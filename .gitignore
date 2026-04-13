@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# Uploads & sessions
+uploads/
+sessions.json
+saved_answer_keys/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Build output (served by Flask)
+static/dist/
+
+# OS
+.DS_Store
+*.log
