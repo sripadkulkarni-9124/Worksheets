@@ -1,0 +1,28 @@
+# Environment
+.env
+backend/.env
+
+# Database
+*.db
+
+# Dependencies
+node_modules/
+__pycache__/
+
+# Build
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Virtual env
+venv/
+backend/venv/
+.venv/
+
+# Claude
+.claude/
+
+# OS
+.DS_Store
