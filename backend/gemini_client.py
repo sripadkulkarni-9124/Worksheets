@@ -28,30 +28,45 @@ MODEL = "gemini-2.5-flash"
 
 EVALUATE_PROMPT = """You are VED, an expert AI educational evaluator. Carefully analyze this student worksheet image.
 
-STEP 1 — READ THE IMAGE CAREFULLY:
+STEP 1 — COUNT THE QUESTIONS:
+- Count ONLY the main printed question numbers on the worksheet (e.g. "Question 1", "Question 2", etc.)
+- Sub-parts like 1.a, 1.b, 3.1, 3.2 are NOT separate questions — they belong to their parent question
+- If the worksheet has Question 1 through Question 5, you return EXACTLY 5 questions
+- NEVER split sub-parts into separate question entries
+
+STEP 2 — READ THE IMAGE CAREFULLY:
 - Look at every printed question number and question text
 - Find every blank, box, or lined area where the student wrote their answer
 - Read handwritten text carefully — look at letter shapes, not just outlines
 - If a box/blank is empty or has no writing, mark as unanswered
 - Do NOT confuse printed text with handwritten answers
+- For questions with sub-parts (3.1, 3.2), combine ALL sub-part answers into ONE studentAnswer
 
-STEP 2 — LOCATE EACH QUESTION ON THE IMAGE:
-- For each question, find where its block starts (top edge) and ends (bottom edge) on the image
-- Return bbox: [y_start, y_end] — integers from 0 to 1000
-- 0 = top of image, 1000 = bottom of image
-- y_start = top of that question's printed dashed border or header
-- y_end = bottom of that question's printed dashed border (just before next question starts)
-- Each question has ONE bbox covering the entire question area (including sub-parts)
-- Boxes must NOT overlap: each y_end < next y_start
+STEP 3 — LOCATE EACH QUESTION ON THE IMAGE:
+For each question, return TWO bounding boxes as [ymin, xmin, ymax, xmax] integers 0-1000:
+  (a) box_2d — the FULL question block (printed border, header to bottom edge)
+      - Must cover ALL sub-parts (e.g. Q3 box covers 3.1 AND 3.2)
+      - ONE box per main question number
+  (b) answer_box — the EXACT spot where the student wrote/marked their answer
+      - For MCQ: tightly wrap the checkbox/option the student ticked
+      - For fill-in-the-blank: tightly wrap the handwritten text only
+      - For true/false: tightly wrap the checkbox the student marked
+      - For written answers: tightly wrap the handwritten answer area only
+      - Must be TIGHT — just the answer, not surrounding printed text
+      - If multiple sub-parts, wrap the sub-part with the wrong answer
+      - If unanswered, set answer_box to null
 
-STEP 3 — EVALUATE EACH ANSWER:
+Coordinate system: 0,0 = top-left; 1000,1000 = bottom-right
+Boxes must NOT overlap vertically
+
+STEP 4 — EVALUATE EACH ANSWER:
 - Compare the student's handwritten answer to the mathematically/scientifically correct answer
 - "correct": answer is right (allow minor spelling variation)
 - "partially_correct": concept is right but incomplete, unsimplified, or minor error
 - "incorrect": wrong answer
 - "unanswered": blank, empty, or no writing detected
 
-STEP 4 — GENERATE EDUCATIONAL CONTENT:
+STEP 5 — GENERATE EDUCATIONAL CONTENT:
 - correctAnswer: the full, simplified, proper answer
 - feedback: 1-2 sentences, encouraging, specific to this student's attempt
 - vedInsight: one memorable insight or tip (1-2 sentences)
@@ -73,7 +88,8 @@ Return ONLY valid JSON — no markdown, no backticks, no explanation:
       "feedback": "specific, encouraging 1-2 sentence feedback",
       "vedInsight": "key learning insight for this concept",
       "steps": [{"title": "Step 1: Action", "points": ["point 1", "point 2"]}],
-      "bbox": [y_start, y_end]
+      "box_2d": [ymin, xmin, ymax, xmax],
+      "answer_box": [ymin, xmin, ymax, xmax]
     }
   ]
 }"""

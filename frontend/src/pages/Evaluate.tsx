@@ -113,15 +113,7 @@ export default function Evaluate() {
         const questions = data.result?.questions || []
         const existingBboxes = (data.autoMarks || []).filter((m: { type: string; w?: number }) => m.type === 'bbox')
         const bboxCount = existingBboxes.length
-        const needsReannotate = (() => {
-          if (bboxCount === 0 || bboxCount !== questions.length) return true
-          // Check if all bbox widths are consistent (within 1% tolerance)
-          const widths = existingBboxes.map((m: { w?: number }) => m.w || 0)
-          const maxW = Math.max(...widths)
-          const minW = Math.min(...widths)
-          if (maxW - minW > 0.01) return true  // inconsistent widths = stale data
-          return false
-        })()
+        const needsReannotate = bboxCount === 0 || bboxCount !== questions.length
         if (questions.length > 0 && needsReannotate) {
           setAnnotating(true)
           try {

@@ -39,154 +39,142 @@ async def _call_gemini_with_retry(client, model, contents, config, max_retries=1
     raise last_error or Exception("Gemini evaluate failed after retries")
 
 
-# ── Stable bbox normalization ──
-# Content area on 0-1000 scale (where question boxes live)
-CONTENT_TOP    = 60    # top of first question area
-CONTENT_BOTTOM = 975   # bottom of last question area
-MIN_GAP        = 12    # minimum gap between consecutive boxes
-
-def _stabilize_bboxes(questions: list[dict]) -> list[dict]:
+def _sanitize_bboxes(questions: list[dict]) -> list[dict]:
     """
-    Stabilize Gemini's bbox output using proportional redistribution.
+    Sanitize Gemini's box_2d output — keep raw positions, only fix issues.
 
-    Strategy:
-    1. Parse raw bboxes, auto-detect scale
-    2. Extract Gemini's RELATIVE proportions (which box is bigger/smaller)
-    3. Redistribute into a FIXED content window [CONTENT_TOP, CONTENT_BOTTOM]
-       using those proportions — this eliminates absolute offset drift
-    4. Enforce minimum gaps, clamp to bounds
-    5. Fall back to even distribution if no bbox data
+    Gemini returns box_2d: [ymin, xmin, ymax, xmax] on 0-1000 scale.
+    We convert to bbox_norm: [ymin, xmin, ymax, xmax] on 0-1 scale.
+
+    Only fixes: clamp to [0,1000], ensure ymin < ymax / xmin < xmax,
+    fix overlaps, fallback for missing boxes.
     """
     num_q = len(questions)
     if num_q == 0:
         return questions
 
-    # ── Step 1: Parse raw bboxes ──
-    raw_boxes = []  # list of (y_start, y_end) or None
+    # ── Parse raw boxes ──
+    raw_boxes = []  # (ymin, xmin, ymax, xmax) or None
     for q in questions:
-        bb = q.get("bbox")
-        if bb and isinstance(bb, list) and len(bb) >= 2:
-            raw_boxes.append((float(bb[0]), float(bb[1])))
+        bb = q.get("box_2d") or q.get("bbox")
+        if bb and isinstance(bb, list) and len(bb) >= 4:
+            raw_boxes.append(tuple(float(v) for v in bb[:4]))
+        elif bb and isinstance(bb, list) and len(bb) == 2:
+            # Legacy [y_start, y_end] — add default X
+            raw_boxes.append((float(bb[0]), 10.0, float(bb[1]), 850.0))
         else:
             raw_boxes.append(None)
 
     # Auto-detect 0-100 scale
-    all_vals = [v for pair in raw_boxes if pair for v in pair]
-    scale = 1
+    all_vals = [v for box in raw_boxes if box for v in box]
     if all_vals and max(all_vals) <= 100:
-        scale = 10
-        print(f"[EVALUATE] Auto-detected 0-100 bbox scale, multiplying by 10")
-        raw_boxes = [(s * scale, e * scale) if pair else None
-                     for pair, (s, e) in zip(raw_boxes, [(b or (0, 0)) for b in raw_boxes])]
-        # Fix: re-parse with scale
-        raw_boxes = []
-        for q in questions:
-            bb = q.get("bbox")
-            if bb and isinstance(bb, list) and len(bb) >= 2:
-                raw_boxes.append((float(bb[0]) * scale, float(bb[1]) * scale))
-            else:
-                raw_boxes.append(None)
+        print(f"[EVALUATE] Auto-detected 0-100 scale, multiplying by 10")
+        raw_boxes = [
+            tuple(v * 10 for v in box) if box else None
+            for box in raw_boxes
+        ]
 
-    valid_boxes = [(i, s, e) for i, pair in enumerate(raw_boxes)
-                   if pair and pair[1] > pair[0]
-                   for s, e in [pair]]
+    # Log raw
+    print(f"[EVALUATE] Raw Gemini boxes ({sum(1 for b in raw_boxes if b)}/{num_q} valid):")
+    for i, box in enumerate(raw_boxes):
+        if box:
+            ymin, xmin, ymax, xmax = box
+            print(f"  Q{questions[i].get('number','?')}: [y:{ymin:.0f}-{ymax:.0f}, x:{xmin:.0f}-{xmax:.0f}]")
 
-    print(f"[EVALUATE] Raw Gemini bboxes ({len(valid_boxes)}/{num_q} valid):")
-    for i, s, e in valid_boxes:
-        print(f"  Q{questions[i].get('number','?')}: [{s:.0f}, {e:.0f}] h={e-s:.0f}")
+    # ── Clamp and fix ordering ──
+    for i, box in enumerate(raw_boxes):
+        if box is None:
+            continue
+        ymin, xmin, ymax, xmax = box
+        ymin = max(0, min(1000, ymin))
+        ymax = max(0, min(1000, ymax))
+        xmin = max(0, min(1000, xmin))
+        xmax = max(0, min(1000, xmax))
+        if ymin >= ymax:
+            ymin, ymax = ymax, ymin
+        if ymin == ymax:
+            ymax = ymin + 50
+        if xmin >= xmax:
+            xmin, xmax = xmax, xmin
+        if xmin == xmax:
+            xmax = xmin + 100
+        raw_boxes[i] = (ymin, xmin, ymax, xmax)
 
-    # ── Step 2: Compute proportional heights ──
-    content_span = CONTENT_BOTTOM - CONTENT_TOP
-    total_gaps = (num_q - 1) * MIN_GAP
-    usable_span = content_span - total_gaps
-
-    if len(valid_boxes) >= 2:
-        # Use Gemini's relative heights as weights
-        heights = []
+    # ── Fill missing boxes by interpolation ──
+    valid_indices = [i for i, b in enumerate(raw_boxes) if b is not None]
+    if len(valid_indices) == 0:
+        # No boxes at all — even distribution, full width
+        slot_h = 900 / num_q
         for i in range(num_q):
-            match = next((s, e) for j, s, e in valid_boxes if j == i) if any(j == i for j, _, _ in valid_boxes) else None
-            if match:
-                heights.append(match[1] - match[0])
+            ymin = 50 + i * slot_h
+            ymax = ymin + slot_h - 10
+            raw_boxes[i] = (ymin, 10, ymax, 850)
+    elif len(valid_indices) < num_q:
+        # Some missing — interpolate from neighbors
+        known_heights = [raw_boxes[i][2] - raw_boxes[i][0] for i in valid_indices]
+        avg_h = sum(known_heights) / len(known_heights)
+        for i in range(num_q):
+            if raw_boxes[i] is not None:
+                continue
+            # Find nearest valid neighbor
+            prev_end = None
+            next_start = None
+            for j in range(i - 1, -1, -1):
+                if raw_boxes[j]:
+                    prev_end = raw_boxes[j][2]
+                    break
+            for j in range(i + 1, num_q):
+                if raw_boxes[j]:
+                    next_start = raw_boxes[j][0]
+                    break
+            if prev_end is not None:
+                ymin = prev_end + 5
+            elif next_start is not None:
+                ymin = next_start - avg_h - 5
             else:
-                # Missing box — use median of known heights
-                known_h = [e - s for _, s, e in valid_boxes]
-                heights.append(sorted(known_h)[len(known_h) // 2])
+                ymin = 50
+            ymin = max(0, ymin)
+            ymax = min(1000, ymin + avg_h)
+            raw_boxes[i] = (ymin, 10, ymax, 850)
 
-        # Check if heights are roughly uniform (max/min ratio < 2x)
-        # If so, use even distribution — more stable than Gemini's noisy heights
-        h_sorted = sorted(heights)
-        if h_sorted[0] > 0 and h_sorted[-1] / h_sorted[0] < 2.0:
-            weights = [1.0 / num_q] * num_q
-            print(f"[EVALUATE] Heights roughly uniform (ratio {h_sorted[-1]/h_sorted[0]:.1f}x) — using even distribution")
-        else:
-            # Genuinely different sizes — blend Gemini proportions with even (50/50)
-            # This dampens outliers while preserving real size differences
-            total_h = sum(heights)
-            if total_h <= 0:
-                weights = [1.0 / num_q] * num_q
-            else:
-                even_w = 1.0 / num_q
-                gemini_w = [h / total_h for h in heights]
-                weights = [(g * 0.5 + even_w * 0.5) for g in gemini_w]
-                # Re-normalize
-                ws = sum(weights)
-                weights = [w / ws for w in weights]
-            print(f"[EVALUATE] Height weights (blended): {[f'{w:.2f}' for w in weights]}")
-    else:
-        # No valid boxes or only 1 — even distribution
-        weights = [1.0 / num_q] * num_q
-        print(f"[EVALUATE] Using even distribution (insufficient bbox data)")
+    # ── Fix overlaps (push down) ──
+    # Sort by ymin, fix overlaps
+    indexed = list(enumerate(raw_boxes))
+    indexed.sort(key=lambda x: x[1][0])
+    for k in range(1, len(indexed)):
+        prev_idx, prev_box = indexed[k - 1]
+        curr_idx, curr_box = indexed[k]
+        if curr_box[0] < prev_box[2] + 2:
+            gap = (prev_box[2] + curr_box[0]) / 2
+            new_prev = (prev_box[0], prev_box[1], gap - 1, prev_box[3])
+            new_curr = (gap + 1, curr_box[1], curr_box[2], curr_box[3])
+            indexed[k - 1] = (prev_idx, new_prev)
+            indexed[k] = (curr_idx, new_curr)
 
-    # ── Step 3: Redistribute into fixed content window ──
-    final_boxes = []
-    y_cursor = CONTENT_TOP
+    # Write back
+    for idx, box in indexed:
+        raw_boxes[idx] = box
+
+    # ── Convert to 0-1 normalized and assign ──
     for i in range(num_q):
-        box_h = usable_span * weights[i]
-        # Enforce minimum height (at least 3% of content area)
-        box_h = max(box_h, content_span * 0.03)
-        y_start = y_cursor
-        y_end = y_start + box_h
-        final_boxes.append([y_start, y_end])
-        y_cursor = y_end + MIN_GAP
+        ymin, xmin, ymax, xmax = raw_boxes[i]
+        questions[i]["bbox_norm"] = [ymin / 1000, xmin / 1000, ymax / 1000, xmax / 1000]
 
-    # ── Step 4: If we overshot, scale back proportionally ──
-    if final_boxes and final_boxes[-1][1] > CONTENT_BOTTOM:
-        overshoot = final_boxes[-1][1] - CONTENT_BOTTOM
-        # Shrink all boxes proportionally
-        shrink_per_box = overshoot / num_q
-        y_cursor = CONTENT_TOP
-        for i in range(num_q):
-            box_h = (final_boxes[i][1] - final_boxes[i][0]) - shrink_per_box
-            box_h = max(box_h, content_span * 0.03)
-            final_boxes[i] = [y_cursor, y_cursor + box_h]
-            y_cursor = final_boxes[i][1] + MIN_GAP
-
-    # ── Step 5: Clamp final box to CONTENT_BOTTOM ──
-    if final_boxes and final_boxes[-1][1] > CONTENT_BOTTOM:
-        final_boxes[-1][1] = CONTENT_BOTTOM
-
-    # ── Step 6: Assign back to questions ──
-    # Sort questions by original bbox order (top to bottom) if available
-    if valid_boxes:
-        # Create index mapping: question index → vertical position
-        order = list(range(num_q))
-        # Sort by raw y_start (valid ones), put missing at end
-        def sort_key(i):
-            match = next(((s,) for j, s, e in valid_boxes if j == i), None)
-            return match[0] if match else 9999
-        order.sort(key=sort_key)
-    else:
-        order = list(range(num_q))
-
-    for rank, qi in enumerate(order):
-        questions[qi]["bbox"] = final_boxes[rank]
+        # Normalize answer_box too (exact spot of student's answer)
+        ab = questions[i].get("answer_box")
+        if ab and isinstance(ab, list) and len(ab) >= 4:
+            questions[i]["answer_box_norm"] = [float(v) / 1000 for v in ab[:4]]
+        else:
+            questions[i]["answer_box_norm"] = None
 
     # ── Log ──
-    print(f"[EVALUATE] Stabilized bboxes ({num_q} questions):")
+    print(f"[EVALUATE] Sanitized bboxes ({num_q} questions):")
     for q in questions:
-        bb = q.get("bbox", [0, 0])
-        print(f"  Q{q.get('number', '?')}: [{bb[0]:.0f}, {bb[1]:.0f}] "
-              f"→ y={bb[0]/1000:.3f}-{bb[1]/1000:.3f} h={((bb[1]-bb[0])/1000):.3f}")
+        bb = q.get("bbox_norm", [0, 0, 0, 0])
+        ab = q.get("answer_box_norm")
+        ab_str = f" ans=[{ab[0]:.3f},{ab[1]:.3f},{ab[2]:.3f},{ab[3]:.3f}]" if ab else ""
+        print(f"  Q{q.get('number', '?')}: y=[{bb[0]:.3f}, {bb[2]:.3f}] "
+              f"x=[{bb[1]:.3f}, {bb[3]:.3f}]{ab_str}")
 
     return questions
 
@@ -220,8 +208,8 @@ async def evaluate(req: EvaluateRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI service error: {str(e)}")
 
-    # Stabilize bboxes
+    # Sanitize bboxes — keep Gemini positions, just fix issues
     if "questions" in data and isinstance(data["questions"], list):
-        data["questions"] = _stabilize_bboxes(data["questions"])
+        data["questions"] = _sanitize_bboxes(data["questions"])
 
     return {"success": True, **data}

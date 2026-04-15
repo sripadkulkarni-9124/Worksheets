@@ -1,6 +1,6 @@
 """
-Annotation mark generator — converts evaluate results (with bbox) into canvas marks.
-No Gemini call. Uses fixed X layout + bbox [y_start, y_end] from evaluate.
+Annotation mark generator — converts evaluate results (with bbox_norm) into canvas marks.
+No Gemini call. Uses Gemini's actual bounding box positions from evaluate.
 """
 
 from fastapi import APIRouter
@@ -8,11 +8,8 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-# Fixed X layout on 0-1 scale
-X_LEFT  = 0.01   # left edge of border rect
-X_WIDTH = 0.84   # border rect width (1% to 85%)
-TICK_X  = 0.88   # tick/cross X position (right margin)
-BADGE_X = 0.88   # badge X position
+# Badge/tick offset from bbox right edge
+BADGE_OFFSET = 0.03  # 3% right of bbox right edge
 
 STATUS_COLOR = {
     "correct":           "#22C55E",
@@ -46,61 +43,66 @@ async def annotate(req: AnnotateRequest):
         status = q.get("status", "unanswered")
         color = STATUS_COLOR.get(status, "#9CA3AF")
 
-        # bbox from evaluate: [y_start, y_end] on 0-1000 scale
-        bbox = q.get("bbox", [])
-        if not bbox or len(bbox) < 2:
-            # Fallback: even distribution
+        # bbox_norm: [ymin, xmin, ymax, xmax] on 0-1 scale (full question block)
+        bb = q.get("bbox_norm", [])
+        if bb and len(bb) == 4:
+            ymin, xmin, ymax, xmax = bb
+        else:
             num_q = len(req.questions)
             slot = 0.886 / num_q
-            y0 = 0.084 + qi * slot
-            y1 = y0 + slot - 0.01
+            ymin = 0.084 + qi * slot
+            ymax = ymin + slot - 0.01
+            xmin = 0.01
+            xmax = 0.85
+
+        # answer_box_norm: [ymin, xmin, ymax, xmax] tight around student's answer
+        ab = q.get("answer_box_norm")
+
+        # ── ONE BBOX per question ──
+        # Wrong/partial → use answer_box (tight around wrong answer) with filled highlight
+        # Correct → use full question box_2d with border only
+        is_wrong = status in ("incorrect", "partially_correct", "partial")
+
+        if is_wrong and ab and len(ab) == 4:
+            # Tight box around wrong answer
+            by, bx, by2, bx2 = ab
         else:
-            y0 = bbox[0] / 1000.0
-            y1 = bbox[1] / 1000.0
+            # Full question block
+            by, bx, by2, bx2 = ymin, xmin, ymax, xmax
 
-        h = y1 - y0
-        mid_y = y0 + h / 2
+        bw = bx2 - bx
+        bh = by2 - by
+        mid_y = by + bh / 2
+        badge_x = min(bx2 + BADGE_OFFSET, 0.96)
 
-        # 1. BBOX — colored border rect (1% to 85% width)
         marks.append({
             "type": "bbox",
-            "x": X_LEFT, "y": y0,
-            "w": X_WIDTH, "h": h,
+            "x": bx, "y": by,
+            "w": bw, "h": bh,
             "color": color, "status": status, "label": f"Q{qnum}",
+            "filled": is_wrong,  # filled highlight for wrong, border-only for correct
         })
 
-        # 2. BADGE — right margin, vertically centered
+        # BADGE — right of bbox
         marks.append({
             "type": "badge",
-            "x": BADGE_X, "y": mid_y,
+            "x": badge_x, "y": mid_y,
             "status": status, "color": color, "label": f"Q{qnum}",
             "marks_awarded": q.get("marks_obtained", q.get("marks_awarded", 0)),
             "marks_possible": q.get("max_marks", q.get("marks_possible", 1)),
         })
 
-        # 3. TICK or CROSS — at 88% width, vertically centered
+        # TICK or CROSS
         if status == "correct":
-            marks.append({"type": "tick", "x": TICK_X, "y": mid_y, "color": color})
+            marks.append({"type": "tick", "x": badge_x, "y": mid_y, "color": color})
         elif status in ("incorrect", "unanswered"):
-            marks.append({"type": "cross", "x": TICK_X, "y": mid_y, "color": color})
+            marks.append({"type": "cross", "x": badge_x, "y": mid_y, "color": color})
         elif status in ("partially_correct", "partial"):
-            marks.append({"type": "tick", "x": TICK_X, "y": mid_y, "color": "#F97316"})
+            marks.append({"type": "tick", "x": badge_x, "y": mid_y, "color": "#F97316"})
 
-        # 4. DASHED ELLIPSE over answer area (bottom 30% of block) for wrong answers
-        if status in ("incorrect", "partially_correct", "partial"):
-            ellipse_y = y0 + h * 0.65  # center of bottom 30%
-            ellipse_h = h * 0.25
-            marks.append({
-                "type": "error_highlight",
-                "x": X_LEFT + 0.02, "y": ellipse_y - ellipse_h / 2,
-                "w": X_WIDTH - 0.04, "h": ellipse_h,
-                "color": color, "status": status,
-                "label": q.get("feedback", ""),
-            })
-
-    print(f"[ANNOTATE] Generated {len(marks)} marks for {len(req.questions)} questions (from evaluate bbox)")
+    print(f"[ANNOTATE] Generated {len(marks)} marks for {len(req.questions)} questions")
     for m in marks:
         if m["type"] == "bbox":
-            print(f"  {m['label']}: y={m['y']:.3f} h={m['h']:.3f} bottom={m['y']+m['h']:.3f} status={m['status']}")
+            print(f"  {m['label']}: x={m['x']:.3f} y={m['y']:.3f} w={m['w']:.3f} h={m['h']:.3f} status={m['status']}")
 
     return {"marks": marks}

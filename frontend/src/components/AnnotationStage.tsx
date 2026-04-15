@@ -73,15 +73,29 @@ export default function AnnotationStage({
     return () => { img.onload = null; img.onerror = null }
   }, [imageDataUrl])
 
-  /* ---------- Canvas dimensions ---------- */
-  const { imageWidth, imageHeight } = useMemo(() => {
-    if (!image || !containerSize.width) return { imageWidth: 0, imageHeight: 0 }
+  /* ---------- Canvas dimensions (contain fit) ---------- */
+  const { imageWidth, imageHeight, offsetX, offsetY } = useMemo(() => {
+    if (!image || !containerSize.width || !containerSize.height)
+      return { imageWidth: 0, imageHeight: 0, offsetX: 0, offsetY: 0 }
     const natW = image.naturalWidth || image.width
     const natH = image.naturalHeight || image.height
-    const iw = containerSize.width
-    const ih = iw * (natH / natW)
-    return { imageWidth: iw, imageHeight: ih }
-  }, [image, containerSize.width])
+    const aspect = natW / natH
+    const containerAspect = containerSize.width / containerSize.height
+    let iw: number, ih: number
+    if (aspect > containerAspect) {
+      // Image wider than container — fit to width
+      iw = containerSize.width
+      ih = iw / aspect
+    } else {
+      // Image taller than container — fit to height
+      ih = containerSize.height
+      iw = ih * aspect
+    }
+    // Center in container
+    const ox = Math.floor((containerSize.width - iw) / 2)
+    const oy = Math.floor((containerSize.height - ih) / 2)
+    return { imageWidth: Math.floor(iw), imageHeight: Math.floor(ih), offsetX: ox, offsetY: oy }
+  }, [image, containerSize.width, containerSize.height])
 
   /* ---------- Coordinate helpers ---------- */
   const px = useCallback((norm: number) => norm * imageWidth, [imageWidth])
@@ -92,7 +106,8 @@ export default function AnnotationStage({
   const badgeR = useMemo(() => Math.max(14, imageWidth * 0.026), [imageWidth])
   const symSize = useMemo(() => Math.max(18, imageWidth * 0.022), [imageWidth])
 
-  const needsScroll = imageHeight > containerSize.height
+  // No scroll needed — image always fits
+  const needsScroll = false
 
   /* ---------- Parse marks into buckets ---------- */
   const buckets = useMemo(() => {
@@ -205,28 +220,28 @@ export default function AnnotationStage({
     <div style={{
       width: containerSize.width,
       height: containerSize.height,
-      overflowY: needsScroll ? 'auto' : 'hidden',
-      overflowX: 'hidden',
+      overflow: 'hidden',
     }}>
       <Stage
         ref={stageRef}
-        width={imageWidth}
-        height={imageHeight}
+        width={containerSize.width}
+        height={containerSize.height}
         onClick={handleStageClick}
         onMouseMove={handleMouseMove}
       >
         {/* Layer 0: Image */}
-        <Layer>
+        <Layer x={offsetX} y={offsetY}>
           {image && <KonvaImage image={image} x={0} y={0} width={imageWidth} height={imageHeight} />}
         </Layer>
 
-        {/* Layer 1: Bbox rects */}
-        <Layer>
+        {/* Layer 1: Bbox rects — one per question */}
+        <Layer x={offsetX} y={offsetY}>
           {buckets.bboxes.map((b) => {
             if (b.w === undefined || b.h === undefined) return null
             const status = questions[b.qi]?.status || b.status || 'unanswered'
             const color = STATUS_COLORS[status] || '#9CA3AF'
             const isActive = b.qi === activeQ
+            const isFilled = b.filled || status === 'incorrect' || status === 'partially_correct' || status === 'partial'
             return (
               <Rect
                 key={`bbox-${b.qi}`}
@@ -234,10 +249,10 @@ export default function AnnotationStage({
                 x={px(b.x)} y={py(b.y)}
                 width={px(b.w)} height={py(b.h)}
                 stroke={color}
-                strokeWidth={isActive ? sw * 2.5 : sw}
-                dash={[10, 6]}
-                fill={hexToRgba(color, 0.07)}
-                cornerRadius={6}
+                strokeWidth={isActive ? sw * 2.5 : sw * 1.5}
+                dash={isFilled ? undefined : [10, 6]}
+                fill={isFilled ? hexToRgba(color, 0.25) : hexToRgba(color, 0.07)}
+                cornerRadius={4}
                 shadowColor={isActive ? color : 'transparent'}
                 shadowBlur={isActive ? 14 : 0}
                 listening={true}
@@ -246,28 +261,8 @@ export default function AnnotationStage({
           })}
         </Layer>
 
-        {/* Layer 2: Error highlights (dashed rounded rect) */}
-        <Layer>
-          {buckets.errors.map((e, i) => {
-            if (e.w === undefined || e.h === undefined) return null
-            const color = e.color || '#EF4444'
-            const eh = py(e.h)
-            return (
-              <Rect
-                key={`error-${i}`}
-                x={px(e.x)} y={py(e.y)}
-                width={px(e.w)} height={eh}
-                stroke={color} strokeWidth={2}
-                dash={[6, 5]}
-                fill={hexToRgba(color, 0.10)}
-                cornerRadius={Math.min(eh / 2, 20)}
-              />
-            )
-          })}
-        </Layer>
-
         {/* Layer 3: Tick / Cross */}
-        <Layer>
+        <Layer x={offsetX} y={offsetY}>
           {buckets.ticks.map((t, i) => {
             const cx = px(t.x), cy = py(t.y)
             const s = symSize
@@ -306,7 +301,7 @@ export default function AnnotationStage({
         </Layer>
 
         {/* Layer 4: Badges */}
-        <Layer>
+        <Layer x={offsetX} y={offsetY}>
           {buckets.badges.map((bg) => {
             const cx = px(bg.x), cy = py(bg.y)
             const status = questions[bg.qi]?.status || 'unanswered'
@@ -353,10 +348,10 @@ export default function AnnotationStage({
         </Layer>
 
         {/* Layer 5: Feedback callouts (imperative) */}
-        <Layer ref={feedbackLayerRef} />
+        <Layer ref={feedbackLayerRef} x={offsetX} y={offsetY} />
 
         {/* Layer 6: Score summary */}
-        <Layer>
+        <Layer x={offsetX} y={offsetY}>
           {score && (() => {
             const cardW = Math.min(130, imageWidth * 0.24)
             const cardH = 52

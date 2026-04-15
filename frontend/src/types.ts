@@ -12,7 +12,9 @@ export interface EvaluatedQuestion {
   feedback: string
   vedInsight: string
   steps: SolutionStep[]
-  bbox?: [number, number]  // [y_start, y_end] on 0-1000 scale from Gemini
+  bbox_norm?: [number, number, number, number]  // [ymin, xmin, ymax, xmax] 0-1 from evaluate
+  box_2d?: [number, number, number, number]    // raw Gemini [ymin, xmin, ymax, xmax] 0-1000
+  bbox?: [number, number]                       // legacy [y_start, y_end]
 }
 
 export interface EvaluationResult {
@@ -32,6 +34,7 @@ export interface AutoMark {
   color?: string
   status?: 'correct' | 'incorrect' | 'partially_correct' | 'partial' | 'unanswered'
   label?: string
+  filled?: boolean
   error_type?: string
   marks_awarded?: number
   marks_possible?: number
