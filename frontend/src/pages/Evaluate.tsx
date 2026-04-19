@@ -111,9 +111,9 @@ export default function Evaluate() {
 
         // Re-annotate if marks missing, count mismatch, or inconsistent widths (stale data)
         const questions = data.result?.questions || []
-        const existingBboxes = (data.autoMarks || []).filter((m: { type: string; w?: number }) => m.type === 'bbox')
-        const bboxCount = existingBboxes.length
-        const needsReannotate = bboxCount === 0 || bboxCount !== questions.length
+        const existingPills = (data.autoMarks || []).filter((m: { type: string }) => m.type === 'score_pill' || m.type === 'bbox')
+        const pillCount = existingPills.length
+        const needsReannotate = pillCount === 0 || pillCount !== questions.length
         if (questions.length > 0 && needsReannotate) {
           setAnnotating(true)
           try {
@@ -371,13 +371,16 @@ export default function Evaluate() {
                 </div>
                 {/* Marks badge */}
                 {(() => {
-                  const bboxMark = (autoMarks || []).find(
-                    (m: { type: string; label?: string }) => m.type === 'badge' && m.label === `Q${activeQuestion.number}`
-                  ) as { marks_awarded?: number; marks_possible?: number } | undefined
-                  if (bboxMark && bboxMark.marks_possible) {
+                  // Try score_pill first (new), fallback to badge (legacy)
+                  const pillMark = (autoMarks || []).find(
+                    (m: { type: string; label?: string }) => (m.type === 'score_pill' || m.type === 'badge') && m.label === `Q${activeQuestion.number}`
+                  ) as { score_text?: string; marks_awarded?: number; marks_possible?: number } | undefined
+                  const mp = activeQuestion.marks_possible ?? pillMark?.marks_possible ?? 1
+                  const ma = activeQuestion.marks_awarded ?? pillMark?.marks_awarded ?? 0
+                  if (mp) {
                     return (
                       <div className="text-right flex-shrink-0">
-                        <p className={`${cfg.text} font-bold text-lg`}>{bboxMark.marks_awarded ?? 0}/{bboxMark.marks_possible}</p>
+                        <p className={`${cfg.text} font-bold text-lg`}>{ma}/{mp}</p>
                         <p className="text-white/30 text-xs">marks</p>
                       </div>
                     )

@@ -3,6 +3,15 @@ export interface SolutionStep {
   points: string[]
 }
 
+export interface ErrorDetail {
+  error_type: string
+  pin_point?: [number, number]        // raw [y, x] 0-1000
+  pin_point_norm?: [number, number]   // normalized [y, x] 0-1
+  highlight_box?: [number, number, number, number]
+  highlight_box_norm?: [number, number, number, number]
+  description?: string
+}
+
 export interface EvaluatedQuestion {
   number: number
   questionText: string
@@ -12,9 +21,12 @@ export interface EvaluatedQuestion {
   feedback: string
   vedInsight: string
   steps: SolutionStep[]
-  bbox_norm?: [number, number, number, number]  // [ymin, xmin, ymax, xmax] 0-1 from evaluate
-  box_2d?: [number, number, number, number]    // raw Gemini [ymin, xmin, ymax, xmax] 0-1000
-  bbox?: [number, number]                       // legacy [y_start, y_end]
+  marks_possible?: number
+  marks_awarded?: number
+  bbox_norm?: [number, number, number, number]
+  box_2d?: [number, number, number, number]
+  bbox?: [number, number]
+  errors?: ErrorDetail[]
 }
 
 export interface EvaluationResult {
@@ -26,7 +38,7 @@ export interface EvaluationResult {
 }
 
 export interface AutoMark {
-  type: 'bbox' | 'error_highlight' | 'badge' | 'tick' | 'cross'
+  type: 'bbox' | 'error_highlight' | 'error_pin' | 'highlight_box' | 'score_pill' | 'badge' | 'tick' | 'cross'
   x: number   // 0-1 relative (left edge)
   y: number   // 0-1 relative (top edge)
   w?: number  // 0-1 relative width
@@ -36,6 +48,13 @@ export interface AutoMark {
   label?: string
   filled?: boolean
   error_type?: string
+  description?: string
+  pin_x?: number    // 0-1 normalized
+  pin_y?: number    // 0-1 normalized
+  label_x?: number  // 0-1 label position
+  label_y?: number  // 0-1 label position
+  score_text?: string
+  qi?: number
   marks_awarded?: number
   marks_possible?: number
 }

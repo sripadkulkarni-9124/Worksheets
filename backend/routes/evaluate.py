@@ -160,21 +160,41 @@ def _sanitize_bboxes(questions: list[dict]) -> list[dict]:
         ymin, xmin, ymax, xmax = raw_boxes[i]
         questions[i]["bbox_norm"] = [ymin / 1000, xmin / 1000, ymax / 1000, xmax / 1000]
 
-        # Normalize answer_box too (exact spot of student's answer)
+        # Normalize answer_box too (legacy, kept for compat)
         ab = questions[i].get("answer_box")
         if ab and isinstance(ab, list) and len(ab) >= 4:
             questions[i]["answer_box_norm"] = [float(v) / 1000 for v in ab[:4]]
         else:
             questions[i]["answer_box_norm"] = None
 
+        # Normalize errors array — pin_points and highlight_boxes
+        errors = questions[i].get("errors", [])
+        if isinstance(errors, list):
+            for err in errors:
+                pp = err.get("pin_point")
+                if pp and isinstance(pp, list) and len(pp) >= 2:
+                    err["pin_point_norm"] = [float(pp[0]) / 1000, float(pp[1]) / 1000]
+                else:
+                    err["pin_point_norm"] = None
+                hb = err.get("highlight_box")
+                if hb and isinstance(hb, list) and len(hb) >= 4:
+                    err["highlight_box_norm"] = [float(v) / 1000 for v in hb[:4]]
+                else:
+                    err["highlight_box_norm"] = None
+            questions[i]["errors"] = errors
+
     # ── Log ──
     print(f"[EVALUATE] Sanitized bboxes ({num_q} questions):")
     for q in questions:
         bb = q.get("bbox_norm", [0, 0, 0, 0])
-        ab = q.get("answer_box_norm")
-        ab_str = f" ans=[{ab[0]:.3f},{ab[1]:.3f},{ab[2]:.3f},{ab[3]:.3f}]" if ab else ""
+        errs = q.get("errors", [])
+        err_str = f" errors={len(errs)}" if errs else ""
         print(f"  Q{q.get('number', '?')}: y=[{bb[0]:.3f}, {bb[2]:.3f}] "
-              f"x=[{bb[1]:.3f}, {bb[3]:.3f}]{ab_str}")
+              f"x=[{bb[1]:.3f}, {bb[3]:.3f}]{err_str}")
+        for e in errs:
+            pp = e.get("pin_point_norm")
+            pp_str = f"pin=[{pp[0]:.3f},{pp[1]:.3f}]" if pp else "no-pin"
+            print(f"    {e.get('error_type','?')}: {pp_str}")
 
     return questions
 
