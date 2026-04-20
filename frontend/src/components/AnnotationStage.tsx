@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
+import { useRef, useMemo, useState, useEffect, useCallback } from 'react'
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Group, Text, Circle } from 'react-konva'
 import Konva from 'konva'
 import { AutoMark, EvaluatedQuestion } from '../types'
@@ -11,6 +11,14 @@ const STATUS_COLORS: Record<string, string> = {
   partially_correct: '#F97316',
   partial:           '#F97316',
   unanswered:        '#9CA3AF',
+}
+
+const BADGE_SYMBOLS: Record<string, string> = {
+  correct:           '\u2713',
+  incorrect:         '\u2717',
+  partially_correct: '~',
+  partial:           '~',
+  unanswered:        '\u2014',
 }
 
 function hexToRgba(hex: string, a: number) {
@@ -33,13 +41,7 @@ interface Props {
 }
 
 /* =================================================================
-   AnnotationStage — IntelGrader-style pinpoint error annotations
-
-   Architecture:
-     - Score strip at top (Q1 3/3, Q2 0/2 pills)
-     - Error pins: red dot → dashed leader line → label pill
-     - Highlight boxes: thin red rect around wrong values
-     - Tick/cross near question numbers
+   AnnotationStage — Bbox + IntelGrader error pins + badges
    ================================================================= */
 
 export default function AnnotationStage({
@@ -65,7 +67,7 @@ export default function AnnotationStage({
   }, [imageDataUrl])
 
   /* ---------- Canvas dimensions (contain fit) ---------- */
-  const STRIP_H = 44 // pixels for score strip at top
+  const STRIP_H = 44
   const { imageWidth, imageHeight, offsetX, offsetY } = useMemo(() => {
     if (!image || !containerSize.width || !containerSize.height)
       return { imageWidth: 0, imageHeight: 0, offsetX: 0, offsetY: 0 }
@@ -83,7 +85,10 @@ export default function AnnotationStage({
       iw = ih * aspect
     }
     const ox = Math.floor((containerSize.width - iw) / 2)
-    const oy = STRIP_H // image starts below strip
+    const oy = STRIP_H + Math.floor((availH - ih) / 2)
+    console.log(`[STAGE] nat=${natW}x${natH} container=${containerSize.width}x${containerSize.height} ` +
+      `avail=${containerSize.width}x${availH} fitted=${Math.floor(iw)}x${Math.floor(ih)} ` +
+      `offset=(${ox},${oy}) aspect=${aspect.toFixed(3)} cAspect=${containerAspect.toFixed(3)}`)
     return { imageWidth: Math.floor(iw), imageHeight: Math.floor(ih), offsetX: ox, offsetY: oy }
   }, [image, containerSize.width, containerSize.height])
 
@@ -95,28 +100,24 @@ export default function AnnotationStage({
   const sw = useMemo(() => Math.max(1.5, imageWidth / 400), [imageWidth])
   const dotR = useMemo(() => Math.max(4, imageWidth * 0.008), [imageWidth])
   const fontSize = useMemo(() => Math.max(10, Math.min(13, imageWidth * 0.02)), [imageWidth])
+  const badgeR = useMemo(() => Math.max(14, imageWidth * 0.026), [imageWidth])
 
   /* ---------- Parse marks into buckets ---------- */
   const buckets = useMemo(() => {
+    const bboxes: (AutoMark & { qi: number })[] = []
     const pins: AutoMark[] = []
     const highlights: AutoMark[] = []
     const pills: AutoMark[] = []
-    const ticks: AutoMark[] = []
-    const crosses: AutoMark[] = []
-    // Legacy support
-    const bboxes: (AutoMark & { qi: number })[] = []
+    const badges: (AutoMark & { qi: number })[] = []
 
-    let bi = 0
     for (const m of autoMarks) {
-      if (m.type === 'error_pin') pins.push(m)
+      if (m.type === 'bbox') bboxes.push({ ...m, qi: m.qi ?? bboxes.length })
+      else if (m.type === 'error_pin') pins.push(m)
       else if (m.type === 'highlight_box') highlights.push(m)
       else if (m.type === 'score_pill') pills.push(m)
-      else if (m.type === 'tick') ticks.push(m)
-      else if (m.type === 'cross') crosses.push(m)
-      // Legacy bbox/badge support
-      else if (m.type === 'bbox') bboxes.push({ ...m, qi: bi++ })
+      else if (m.type === 'badge') badges.push({ ...m, qi: m.qi ?? badges.length })
     }
-    return { pins, highlights, pills, ticks, crosses, bboxes }
+    return { bboxes, pins, highlights, pills, badges }
   }, [autoMarks])
 
   /* ---------- Score ---------- */
@@ -133,11 +134,8 @@ export default function AnnotationStage({
   const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     const id = e.target.id()
     if (!id) return
-    if (id.startsWith('pill-')) {
-      const qi = parseInt(id.replace('pill-', ''))
-      if (!isNaN(qi)) onQuestionClick(qi)
-    } else if (id.startsWith('bbox-')) {
-      const qi = parseInt(id.replace('bbox-', ''))
+    if (id.startsWith('pill-') || id.startsWith('bbox-') || id.startsWith('badge-hit-')) {
+      const qi = parseInt(id.replace(/^(pill|bbox|badge-hit)-/, ''))
       if (!isNaN(qi)) onQuestionClick(qi)
     }
   }, [onQuestionClick])
@@ -147,7 +145,8 @@ export default function AnnotationStage({
     if (!stage) return
     const id = e.target.id()
     stage.container().style.cursor =
-      (id?.startsWith('pill-') || id?.startsWith('bbox-')) ? 'pointer' : 'default'
+      (id?.startsWith('pill-') || id?.startsWith('bbox-') || id?.startsWith('badge-hit-'))
+        ? 'pointer' : 'default'
   }, [])
 
   /* ========== RENDER ========== */
@@ -174,25 +173,18 @@ export default function AnnotationStage({
         onClick={handleStageClick}
         onMouseMove={handleMouseMove}
       >
-        {/* Layer 0: Score strip background */}
+        {/* Layer 0: Score strip */}
         <Layer>
-          <Rect
-            x={0} y={0}
-            width={containerSize.width} height={STRIP_H}
-            fill="#1A2332"
-          />
-          {/* Score pills */}
+          <Rect x={0} y={0} width={containerSize.width} height={STRIP_H} fill="#1A2332" />
           {buckets.pills.map((pill, i) => {
             const qi = pill.qi ?? i
             const isActive = qi === activeQ
             const status = pill.status || 'unanswered'
             const color = STATUS_COLORS[status] || '#9CA3AF'
-            const pillX = pillStartX + i * (pillW + pillGap)
-            const pillY = (STRIP_H - pillH) / 2
-
+            const pX = pillStartX + i * (pillW + pillGap)
+            const pY = (STRIP_H - pillH) / 2
             return (
-              <Group key={`pill-${i}`} x={pillX} y={pillY}>
-                {/* Pill background */}
+              <Group key={`pill-${i}`} x={pX} y={pY}>
                 <Rect
                   id={`pill-${qi}`}
                   width={pillW} height={pillH}
@@ -202,22 +194,17 @@ export default function AnnotationStage({
                   cornerRadius={pillH / 2}
                   listening={true}
                 />
-                {/* Label + score */}
                 <Text
                   text={`${pill.label || ''} ${pill.score_text || ''}`}
-                  x={0} y={0}
-                  width={pillW} height={pillH}
+                  x={0} y={0} width={pillW} height={pillH}
                   align="center" verticalAlign="middle"
                   fontSize={11} fontStyle="bold"
                   fontFamily="-apple-system, sans-serif"
-                  fill={color}
-                  listening={false}
+                  fill={color} listening={false}
                 />
               </Group>
             )
           })}
-
-          {/* Overall score at right */}
           {score && (
             <Text
               text={`${score.got}/${score.total} (${score.pct}%)`}
@@ -236,7 +223,34 @@ export default function AnnotationStage({
           {image && <KonvaImage image={image} x={0} y={0} width={imageWidth} height={imageHeight} />}
         </Layer>
 
-        {/* Layer 2: Highlight boxes — thin red rects around wrong values */}
+        {/* Layer 2: Bbox dashed outlines per question */}
+        <Layer x={offsetX} y={offsetY}>
+          {buckets.bboxes.map((b) => {
+            if (b.w === undefined || b.h === undefined) return null
+            const qi = b.qi ?? 0
+            const status = questions[qi]?.status || b.status || 'unanswered'
+            const color = STATUS_COLORS[status] || '#9CA3AF'
+            const isActive = qi === activeQ
+            return (
+              <Rect
+                key={`bbox-${qi}`}
+                id={`bbox-${qi}`}
+                x={px(b.x)} y={py(b.y)}
+                width={px(b.w)} height={py(b.h)}
+                stroke={color}
+                strokeWidth={isActive ? sw * 2.5 : sw * 1.5}
+                dash={[10, 6]}
+                fill={hexToRgba(color, 0.05)}
+                cornerRadius={4}
+                shadowColor={isActive ? color : 'transparent'}
+                shadowBlur={isActive ? 14 : 0}
+                listening={true}
+              />
+            )
+          })}
+        </Layer>
+
+        {/* Layer 3: Highlight boxes — thin rect around wrong values */}
         <Layer x={offsetX} y={offsetY} listening={false}>
           {buckets.highlights.map((h, i) => {
             if (h.w === undefined || h.h === undefined) return null
@@ -255,7 +269,7 @@ export default function AnnotationStage({
           })}
         </Layer>
 
-        {/* Layer 3: Error pins — dot + dashed line + label pill */}
+        {/* Layer 4: Error pins — dot + dashed line + label pill */}
         <Layer x={offsetX} y={offsetY} listening={false}>
           {buckets.pins.map((pin, i) => {
             if (pin.pin_x === undefined || pin.pin_y === undefined) return null
@@ -290,7 +304,7 @@ export default function AnnotationStage({
                   shadowBlur={6}
                   shadowOpacity={0.5}
                 />
-                {/* Label pill background */}
+                {/* Label pill */}
                 <Rect
                   x={labelPx} y={labelPy}
                   width={estTextW} height={labelH}
@@ -302,7 +316,6 @@ export default function AnnotationStage({
                   shadowBlur={4}
                   shadowOffsetY={1}
                 />
-                {/* Label text */}
                 <Text
                   x={labelPx + labelPadX} y={labelPy + labelPadY}
                   text={labelText}
@@ -316,72 +329,49 @@ export default function AnnotationStage({
           })}
         </Layer>
 
-        {/* Layer 4: Tick / Cross near question numbers */}
-        <Layer x={offsetX} y={offsetY} listening={false}>
-          {buckets.ticks.map((t, i) => {
-            const cx = px(t.x), cy = py(t.y)
-            const s = Math.max(8, imageWidth * 0.012)
+        {/* Layer 5: Badges — circle with ✓/✗/~ per question */}
+        <Layer x={offsetX} y={offsetY}>
+          {buckets.badges.map((bg) => {
+            const qi = bg.qi ?? 0
+            const status = questions[qi]?.status || bg.status || 'unanswered'
+            const color = STATUS_COLORS[status] || '#9CA3AF'
+            const symbol = BADGE_SYMBOLS[status] || '\u2014'
+            const cx = px(bg.x), cy = py(bg.y)
+            const awarded = bg.marks_awarded ?? 0
+            const possible = bg.marks_possible ?? 1
             return (
-              <Line
-                key={`tick-${i}`}
-                points={[
-                  cx - s * 0.35, cy,
-                  cx, cy + s * 0.35,
-                  cx + s * 0.45, cy - s * 0.35,
-                ]}
-                stroke={t.color || '#22C55E'}
-                strokeWidth={Math.max(2, s * 0.2)}
-                lineCap="round" lineJoin="round"
-              />
-            )
-          })}
-          {buckets.crosses.map((c, i) => {
-            const cx = px(c.x), cy = py(c.y)
-            const s = Math.max(6, imageWidth * 0.01)
-            return (
-              <Group key={`cross-${i}`}>
-                <Line
-                  points={[cx - s, cy - s, cx + s, cy + s]}
-                  stroke="#EF4444" strokeWidth={Math.max(2, s * 0.2)}
-                  lineCap="round"
+              <Group key={`badge-${qi}`} x={cx} y={cy}>
+                <Circle
+                  radius={badgeR} fill={color}
+                  shadowColor="rgba(0,0,0,0.25)" shadowBlur={6} shadowOffsetY={2}
                 />
-                <Line
-                  points={[cx + s, cy - s, cx - s, cy + s]}
-                  stroke="#EF4444" strokeWidth={Math.max(2, s * 0.2)}
-                  lineCap="round"
+                <Text
+                  text={symbol}
+                  fontSize={badgeR * 1.1} fontStyle="bold"
+                  fontFamily="-apple-system, sans-serif"
+                  fill="#fff"
+                  width={badgeR * 2} height={badgeR * 2}
+                  offsetX={badgeR} offsetY={badgeR}
+                  align="center" verticalAlign="middle"
+                />
+                <Text
+                  text={`${awarded}/${possible}`}
+                  fontSize={badgeR * 0.6} fontStyle="bold"
+                  fontFamily="-apple-system, sans-serif"
+                  fill={color}
+                  width={badgeR * 3}
+                  offsetX={badgeR * 1.5}
+                  y={badgeR + 4}
+                  align="center"
+                />
+                <Circle
+                  id={`badge-hit-${qi}`}
+                  radius={badgeR + 5} fill="transparent" listening={true}
                 />
               </Group>
             )
           })}
         </Layer>
-
-        {/* Layer 5: Legacy bbox support (for old sessions) */}
-        {buckets.bboxes.length > 0 && (
-          <Layer x={offsetX} y={offsetY}>
-            {buckets.bboxes.map((b) => {
-              if (b.w === undefined || b.h === undefined) return null
-              const status = questions[b.qi]?.status || b.status || 'unanswered'
-              const color = STATUS_COLORS[status] || '#9CA3AF'
-              const isActive = b.qi === activeQ
-              return (
-                <Rect
-                  key={`bbox-${b.qi}`}
-                  id={`bbox-${b.qi}`}
-                  x={px(b.x)} y={py(b.y)}
-                  width={px(b.w)} height={py(b.h)}
-                  stroke={color}
-                  strokeWidth={isActive ? sw * 2.5 : sw * 1.5}
-                  dash={[10, 6]}
-                  fill={hexToRgba(color, 0.07)}
-                  cornerRadius={4}
-                  shadowColor={isActive ? color : 'transparent'}
-                  shadowBlur={isActive ? 14 : 0}
-                  listening={true}
-                />
-              )
-            })}
-          </Layer>
-        )}
       </Stage>
     </div>
   )

@@ -66,6 +66,18 @@ async def annotate(req: AnnotateRequest):
 
         is_wrong = status in ("incorrect", "partially_correct", "partial")
 
+        bw = xmax - xmin
+        bh = ymax - ymin
+
+        # ── BBOX — dashed outline around full question ──
+        marks.append({
+            "type": "bbox",
+            "qi": qi,
+            "x": xmin, "y": ymin,
+            "w": bw, "h": bh,
+            "color": color, "status": status, "label": f"Q{qnum}",
+        })
+
         # ── SCORE STRIP pill ──
         marks.append({
             "type": "score_pill",
@@ -146,16 +158,17 @@ async def annotate(req: AnnotateRequest):
                 "label": f"Q{qnum}",
             })
 
-        # ── TICK or CROSS near question number ──
-        # Place near top-left of question bbox
-        sym_x = xmin + 0.01
-        sym_y = ymin + 0.01
-        if status == "correct":
-            marks.append({"type": "tick", "x": sym_x, "y": sym_y, "color": color})
-        elif status in ("incorrect", "unanswered"):
-            marks.append({"type": "cross", "x": sym_x, "y": sym_y, "color": color})
-        elif is_wrong:
-            marks.append({"type": "tick", "x": sym_x, "y": sym_y, "color": "#F97316"})
+        # ── BADGE — circle with ✓/✗/~ at top-right of bbox ──
+        badge_x = min(xmax + 0.02, 0.96)
+        badge_y = ymin + 0.02
+        marks.append({
+            "type": "badge",
+            "qi": qi,
+            "x": badge_x, "y": badge_y,
+            "status": status, "color": color, "label": f"Q{qnum}",
+            "marks_awarded": marks_awarded,
+            "marks_possible": marks_possible,
+        })
 
     # Log
     pin_count = sum(1 for m in marks if m["type"] == "error_pin")

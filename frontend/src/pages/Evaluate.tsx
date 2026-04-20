@@ -111,9 +111,13 @@ export default function Evaluate() {
 
         // Re-annotate if marks missing, count mismatch, or inconsistent widths (stale data)
         const questions = data.result?.questions || []
-        const existingPills = (data.autoMarks || []).filter((m: { type: string }) => m.type === 'score_pill' || m.type === 'bbox')
+        // Count score_pills only (one per question) — bbox also emits one per Q but don't double-count
+        const existingPills = (data.autoMarks || []).filter((m: { type: string }) => m.type === 'score_pill')
         const pillCount = existingPills.length
-        const needsReannotate = pillCount === 0 || pillCount !== questions.length
+        // Fallback: old sessions may have bbox but no score_pill
+        const bboxCount = (data.autoMarks || []).filter((m: { type: string }) => m.type === 'bbox').length
+        const markCount = pillCount || bboxCount
+        const needsReannotate = markCount === 0 || markCount !== questions.length
         if (questions.length > 0 && needsReannotate) {
           setAnnotating(true)
           try {
@@ -267,7 +271,7 @@ export default function Evaluate() {
       {/* Two-panel body */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* LEFT: Worksheet image + Konva stage */}
-        <div className="w-[52%] flex flex-col border-r border-white/10 bg-[#111827]">
+        <div className="w-[52%] flex flex-col border-r border-white/10 bg-[#111827] min-h-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 flex-shrink-0">
             <p className="text-white/50 text-xs font-medium uppercase tracking-wide">Annotated Worksheet</p>
             <button

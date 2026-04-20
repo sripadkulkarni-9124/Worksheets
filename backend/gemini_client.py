@@ -44,9 +44,14 @@ STEP 2 — READ THE IMAGE CAREFULLY:
 
 STEP 3 — LOCATE EACH QUESTION ON THE IMAGE:
 For each question, return bounding box as [ymin, xmin, ymax, xmax] integers 0-1000:
-  box_2d — the FULL question block (printed border, header to bottom edge)
+  box_2d — MUST match the PRINTED dashed/solid border around the question
+    - Align box edges EXACTLY on the printed border lines, not outside them
+    - ymin = top border line, ymax = bottom border line
+    - xmin = left border line, xmax = right border line
+    - If no printed border exists, tightly wrap the question content area
     - Must cover ALL sub-parts (e.g. Q3 box covers 3.1 AND 3.2)
     - ONE box per main question number
+    - Do NOT extend the box beyond the printed borders
 
 Coordinate system: 0,0 = top-left; 1000,1000 = bottom-right
 Boxes must NOT overlap vertically
