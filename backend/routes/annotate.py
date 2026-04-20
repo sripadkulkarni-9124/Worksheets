@@ -9,8 +9,11 @@ Generates:
   - tick/cross: small symbol near question number area
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+# Annotate doesn't use the image, but we still cap payload size to prevent abuse
+MAX_QUESTIONS = 50
 
 router = APIRouter()
 
@@ -42,6 +45,8 @@ def _qnum(val) -> str:
 async def annotate(req: AnnotateRequest):
     if not req.questions:
         return {"marks": []}
+    if len(req.questions) > MAX_QUESTIONS:
+        raise HTTPException(status_code=413, detail=f"Too many questions (max {MAX_QUESTIONS})")
 
     marks: list[dict] = []
     num_q = len(req.questions)

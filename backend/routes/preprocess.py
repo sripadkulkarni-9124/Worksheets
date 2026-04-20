@@ -7,6 +7,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 import base64
 
+from routes.evaluate import _validate_image
+
 router = APIRouter()
 
 
@@ -18,6 +20,9 @@ class PreprocessRequest(BaseModel):
 @router.post("/preprocess")
 async def preprocess(req: PreprocessRequest):
     from utils.perspective import perspective_correct_base64
+
+    # Validate size/MIME before calling OpenCV (protects against OOM on huge images)
+    _validate_image(req.imageBase64, req.mimeType)
 
     corrected_b64, corrected_mime, was_corrected = perspective_correct_base64(
         req.imageBase64, req.mimeType

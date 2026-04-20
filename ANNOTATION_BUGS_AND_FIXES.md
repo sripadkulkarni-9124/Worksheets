@@ -235,3 +235,190 @@ Photo → /api/preprocess (OpenCV dewarp)
 ```
 
 Coordinates: Gemini returns `[ymin, xmin, ymax, xmax]` in 0-1000 → backend converts to `{x, y, w, h}` in 0-1 → frontend maps to pixels via `rx(rel) = rel * imageWidth`.
+
+---
+
+# Session 2 — IntelGrader-style Rewrite + Stabilization
+
+## Bug: `_stabilize_bboxes` Redistributed Y Positions Evenly
+
+### Symptom
+Bboxes did not align with printed dashed question borders even after switching to native 0-1000 format. They were evenly distributed regardless of Gemini's actual output.
+
+### Root Cause
+`_stabilize_bboxes()` in `evaluate.py` took Gemini's y-values and **redistributed them evenly across [60, 975] window**, discarding the actual positions Gemini detected.
+
+### Fix
+Replaced with `_sanitize_bboxes()` that keeps Gemini's raw positions. Only fixes:
+- Clamps to `[0, 1000]`
+- Swaps `ymin/ymax` if inverted (min height 50)
+- Auto-detects 0-100 scale (multiplies ×10)
+- Interpolates missing boxes from neighbors (avg_h)
+- Fixes overlaps by splitting gap at midpoint between adjacent boxes
+
+Output: `bbox_norm = [ymin, xmin, ymax, xmax]` on 0-1 scale.
+
+---
+
+## Feature: Pinpoint Error Location (IntelGrader Style)
+
+### Motivation
+Dashed bbox around full question wasn't granular enough. User wanted red dot at the EXACT wrong digit/sign + dashed leader line + floating label pill ("Calculation Error", "Concept Error", etc.) like intelgrader.com.
+
+### Implementation
+
+**Gemini prompt** — added STEP 5 — PINPOINT ERRORS. Per wrong/partial question, return `errors[]` array, each with:
+- `error_type`: short label ("Calculation Error", "Concept Error", "Sign Error", "Missing Step", "Wrong Formula", "Missing Root", "Result Error")
+- `pin_point`: `[y, x]` on 0-1000 — exact pixel of the mistake
+- `highlight_box`: `[ymin, xmin, ymax, xmax]` on 0-1000 — tight rect around wrong value (nullable)
+- `description`: 1 sentence explanation
+
+**evaluate.py** — `_sanitize_bboxes` now normalizes each error's `pin_point_norm` and `highlight_box_norm` to 0-1 scale.
+
+**annotate.py** — rewrote to emit new mark types:
+- `bbox` — dashed outline per question (all statuses), matches printed border
+- `score_pill` — Q1 3/3 pill for top strip
+- `error_pin` — dot at `pin_x, pin_y` + dashed leader line + label pill at `label_x, label_y`
+- `highlight_box` — thin colored rect around wrong value
+- `badge` — ✓/✗/~ circle at top-right of bbox with marks awarded/possible
+
+**AnnotationStage.tsx** — 6 Konva layers:
+| Layer | Purpose |
+|-------|---------|
+| 0 | Score strip (44px top bar with pills) |
+| 1 | Image (contain-fit, centered) |
+| 2 | Bbox dashed outlines |
+| 3 | Highlight boxes |
+| 4 | Error pins (Circle + Line + Rect + Text group) |
+| 5 | Badges (Circle + symbol + score text + hit area) |
+
+Tick/cross polylines removed (replaced by badges).
+
+---
+
+## Bug: Gemini Split Sub-parts into Separate Questions
+
+### Symptom
+Q3 had sub-parts 3.1, 3.2 → Gemini returned 7 questions instead of 3. Each sub-part got own entry, bbox, badge.
+
+### Fix
+Added **STEP 1 — COUNT THE QUESTIONS** to prompt:
+- Count ONLY main printed question numbers
+- Sub-parts like 1.a, 1.b, 3.1, 3.2 are NOT separate questions
+- NEVER split sub-parts into separate question entries
+- For questions with sub-parts, combine ALL sub-part answers into ONE `studentAnswer`
+
+Verified via backend logs: new scan returns 3 questions, old scan had 7.
+
+---
+
+## Bug: Bbox Width Wider Than Printed Border
+
+### Symptom
+Gemini returned `x=[0.028, 0.975]` for every question — nearly full image width. But printed dashed borders are indented ~5-8% from page edges. Bboxes extended ~3-5% beyond printed border on each side.
+
+### Attempted Fix 1: x-inset Heuristic (REMOVED)
+Added logic in `_sanitize_bboxes`: if all boxes share same x range (variance < 30) spanning > 900 on 0-1000, shrink by 15 (1.5%) each side.
+
+### Why Removed
+Fragile. Triggered on legitimate full-width worksheets too. Hardcoded inset didn't match different worksheet templates. Made boxes too narrow in some cases.
+
+### Current Fix
+Prompt hardening. Explicit wording:
+```
+box_2d — MUST match the PRINTED dashed/solid border around the question
+  - Align box edges EXACTLY on the printed border lines, not outside them
+  - ymin = top border line, ymax = bottom border line
+  - xmin = left border line, xmax = right border line
+  - Do NOT extend the box beyond the printed borders
+```
+Result after prompt fix: `x=[0.056, 0.947]` — much closer to printed borders.
+
+---
+
+## Bug: Reannotate Loop on Every Page Load
+
+### Symptom
+Every time `/evaluate/:id` loaded, backend re-ran `/api/annotate` even though marks were already saved. Log showed repeated `[ANNOTATE] Generated 19 marks` on every page refresh.
+
+### Root Cause
+`Evaluate.tsx` line 114 compared total mark count to question count:
+```ts
+const existingPills = autoMarks.filter(m => m.type === 'score_pill' || m.type === 'bbox')
+const needsReannotate = existingPills.length !== questions.length
+```
+But backend now emits BOTH a `bbox` AND a `score_pill` per question. So `existingPills.length = 2 × questions.length` → mismatch → reannotate every time.
+
+### Fix
+Count only `score_pill` (one per question). Fallback to `bbox` count for old sessions without pills:
+```ts
+const pillCount = autoMarks.filter(m => m.type === 'score_pill').length
+const bboxCount = autoMarks.filter(m => m.type === 'bbox').length
+const markCount = pillCount || bboxCount
+const needsReannotate = markCount === 0 || markCount !== questions.length
+```
+
+---
+
+## Bug: Image Overflowed Container
+
+### Symptom
+On some worksheet aspects the worksheet image was larger than the left panel, bbox outlines and badges cut off. Container didn't clip child Stage.
+
+### Root Cause
+Left panel div had `flex flex-col` but no `min-h-0` or `overflow-hidden`. Flex children can grow past their parent in column layout unless `min-h-0` is set.
+
+### Fix
+Added `min-h-0 overflow-hidden` to left panel:
+```tsx
+<div className="w-[52%] flex flex-col border-r border-white/10 bg-[#111827] min-h-0 overflow-hidden">
+```
+
+Also fixed vertical centering — previously image started right below 44px strip, leaving empty space at bottom if image was short. Now:
+```tsx
+const oy = STRIP_H + Math.floor((availH - ih) / 2)
+```
+
+---
+
+## Bug: Badge Circles Clipped at Image Right Edge
+
+### Symptom
+Badge circles positioned at `xmax + 0.02` landed at `x ≈ 1.0` on normalized scale, then got cut off by Stage width.
+
+### Fix
+Clamp badge x to 0.96 max in annotate.py:
+```python
+badge_x = min(xmax + 0.02, 0.96)
+```
+
+---
+
+## Config Changes Across Session
+
+| Change | File | Reason |
+|--------|------|--------|
+| Added STEP 1 (count questions, no sub-part split) | `gemini_client.py` | Fix Q3 split into 3.1/3.2 |
+| Added STEP 5 (pinpoint errors with pin_point + highlight_box) | `gemini_client.py` | Enable IntelGrader-style markers |
+| Added `marks_possible` + `marks_awarded` to output | `gemini_client.py` | Per-question score display |
+| Replaced `_stabilize_bboxes` with `_sanitize_bboxes` | `evaluate.py` | Keep raw Gemini positions, only fix issues |
+| Added `errors[].pin_point_norm` + `errors[].highlight_box_norm` normalization | `evaluate.py` | Support pinpoint markers |
+| Rewrote `annotate.py` — new mark types: `error_pin`, `highlight_box`, `score_pill` | `annotate.py` | IntelGrader-style rendering |
+| Added `badge` mark back (had been removed in favor of tick/cross polylines) | `annotate.py` | Per user: keep badges, drop tick marks |
+| Clamped badge x to 0.96 | `annotate.py` | Prevent right-edge clipping |
+| Removed `tick` / `cross` polyline marks | `annotate.py` | Replaced by badges |
+| Removed x-inset heuristic | `evaluate.py` | Too aggressive, prompt handles it now |
+| Added `min-h-0 overflow-hidden` to left panel | `Evaluate.tsx` | Fix flex container overflow |
+| Vertical-center image below score strip | `AnnotationStage.tsx` | Fix empty bottom space |
+| Fixed reannotate loop (count `score_pill` only) | `Evaluate.tsx` | Prevent re-call on every page load |
+| Added `ErrorDetail` interface, extended `AutoMark` union | `types.ts` | New mark types |
+| Added `marks_possible`, `marks_awarded`, `errors[]` to `EvaluatedQuestion` | `types.ts` | Match Gemini output |
+
+---
+
+## Open Issues
+
+1. **Bbox width still slightly wider than printed border** on some worksheets (e.g. colorful templates with thicker borders). Prompt improvement partial. Future: CV2 border detection to snap to actual printed edges.
+2. **Error pin label positioning**: currently labels float to the right at fixed offset (0.12). If multiple errors per question, labels can overlap. Future: collision detection + re-layout.
+3. **Badge placement** outside image area when xmax near 1.0. Currently clamped to 0.96 but ideally should reposition (e.g. inside bbox at top-right corner).
+4. **Legacy sessions** don't have score_pill marks → re-annotation triggered on load. Fine for now, may want migration script for bulk update.
