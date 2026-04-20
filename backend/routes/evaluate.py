@@ -1,9 +1,35 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import base64
 import json
 import asyncio
 
 router = APIRouter()
+
+# Max decoded image size (10MB). Base64 is ~1.33x bigger, so ~13.3MB incoming.
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+ALLOWED_MIMES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+
+
+def _validate_image(b64: str, mime: str) -> bytes:
+    """Validate size + MIME, return decoded bytes. Raises HTTPException on failure."""
+    if mime.lower() not in ALLOWED_MIMES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported image type: {mime}. Allowed: {', '.join(ALLOWED_MIMES)}"
+        )
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 payload")
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image too large ({len(raw)//1024}KB). Max {MAX_IMAGE_BYTES//1024//1024}MB."
+        )
+    if len(raw) < 100:
+        raise HTTPException(status_code=400, detail="Image payload too small")
+    return raw
 
 
 class EvaluateRequest(BaseModel):
@@ -208,10 +234,8 @@ async def evaluate(req: EvaluateRequest):
     if not client:
         raise HTTPException(status_code=503, detail="Gemini API key not configured. Set GEMINI_API_KEY in .env")
 
-    image_part = types.Part.from_bytes(
-        data=__import__('base64').b64decode(req.imageBase64),
-        mime_type=req.mimeType
-    )
+    raw_bytes = _validate_image(req.imageBase64, req.mimeType)
+    image_part = types.Part.from_bytes(data=raw_bytes, mime_type=req.mimeType)
 
     config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(thinking_budget=4096),

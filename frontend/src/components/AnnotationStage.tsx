@@ -86,9 +86,10 @@ export default function AnnotationStage({
     }
     const ox = Math.floor((containerSize.width - iw) / 2)
     const oy = STRIP_H + Math.floor((availH - ih) / 2)
-    console.log(`[STAGE] nat=${natW}x${natH} container=${containerSize.width}x${containerSize.height} ` +
-      `avail=${containerSize.width}x${availH} fitted=${Math.floor(iw)}x${Math.floor(ih)} ` +
-      `offset=(${ox},${oy}) aspect=${aspect.toFixed(3)} cAspect=${containerAspect.toFixed(3)}`)
+    if (import.meta.env.DEV) {
+      console.log(`[STAGE] nat=${natW}x${natH} container=${containerSize.width}x${containerSize.height} ` +
+        `fitted=${Math.floor(iw)}x${Math.floor(ih)} offset=(${ox},${oy})`)
+    }
     return { imageWidth: Math.floor(iw), imageHeight: Math.floor(ih), offsetX: ox, offsetY: oy }
   }, [image, containerSize.width, containerSize.height])
 
@@ -130,8 +131,8 @@ export default function AnnotationStage({
     return { got, total, pct: Math.round((got / total) * 100) }
   }, [questions])
 
-  /* ---------- Click handler ---------- */
-  const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+  /* ---------- Click/Tap handler (works for mouse + touch) ---------- */
+  const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     const id = e.target.id()
     if (!id) return
     if (id.startsWith('pill-') || id.startsWith('bbox-') || id.startsWith('badge-hit-')) {
@@ -165,12 +166,14 @@ export default function AnnotationStage({
       width: containerSize.width,
       height: containerSize.height,
       overflow: 'hidden',
+      touchAction: 'manipulation',
     }}>
       <Stage
         ref={stageRef}
         width={containerSize.width}
         height={containerSize.height}
         onClick={handleStageClick}
+        onTap={handleStageClick}
         onMouseMove={handleMouseMove}
       >
         {/* Layer 0: Score strip */}

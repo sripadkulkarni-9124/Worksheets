@@ -234,7 +234,7 @@ export default function Evaluate() {
   const cfg = activeQuestion ? STATUS_CONFIG[activeQuestion.status] : STATUS_CONFIG.unanswered
 
   return (
-    <div className="h-screen bg-[#0F1923] flex flex-col overflow-hidden">
+    <div className="h-[100dvh] bg-[#0F1923] flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-gradient-to-r from-[#1A2332] to-[#1e2d42] border-b border-white/10 px-5 py-3 flex-shrink-0">
         <div className="flex items-center gap-4">
@@ -268,10 +268,10 @@ export default function Evaluate() {
         </div>
       </div>
 
-      {/* Two-panel body */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      {/* Two-panel body — stacks on mobile, side-by-side on md+ */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
         {/* LEFT: Worksheet image + Konva stage */}
-        <div className="w-[52%] flex flex-col border-r border-white/10 bg-[#111827] min-h-0 overflow-hidden">
+        <div className="w-full h-[55vh] md:h-auto md:w-[52%] flex flex-col border-b md:border-b-0 md:border-r border-white/10 bg-[#111827] min-h-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 flex-shrink-0">
             <p className="text-white/50 text-xs font-medium uppercase tracking-wide">Annotated Worksheet</p>
             <button
@@ -325,7 +325,7 @@ export default function Evaluate() {
         </div>
 
         {/* RIGHT: Question details panel */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#0F1923]">
+        <div className="flex-1 flex flex-col overflow-hidden bg-[#0F1923] min-h-0">
           {/* Q tabs */}
           <div className="flex border-b border-white/10 overflow-x-auto flex-shrink-0 scrollbar-hide">
             {questions.map((q, i) => {
