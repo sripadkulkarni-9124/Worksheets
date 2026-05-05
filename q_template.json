@@ -1,0 +1,308 @@
+{
+  "title": "Class 12 Calculus — Differential Equations + Maxima/Minima",
+  "subject": "Mathematics",
+  "chapter": "Calculus",
+  "topic": "Differential Equations, Maxima & Minima, Integrating Factor",
+  "questions": [
+    {
+      "number": 1,
+      "questionText": "The general solution of a differential equation of the type $\\frac{dx}{dy} + \\mathrm{P}_1 x = \\mathrm{Q}_1$ is\n\n$\\text{(a) } y e^{\\int \\mathrm{P}_1 dy} = \\int (\\mathrm{Q}_1 e^{\\int \\mathrm{P}_1 dy}) dy + \\mathrm{C}$\n$\\text{(b) } y . e^{\\int \\mathrm{P}_1 dx} = \\int (\\mathrm{Q}_1 e^{\\int \\mathrm{P}_1 dx}) dx + \\mathrm{C}$\n$\\text{(c) } x e^{\\int \\mathrm{P}_1 dy} = \\int (\\mathrm{Q}_1 e^{\\int \\mathrm{P}_1 dy}) dy + \\mathrm{C}$\n$\\text{(d) } x e^{\\int \\mathrm{P}_1 dx} = \\int (\\mathrm{Q}_1 e^{\\int \\mathrm{P}_1 dx}) dx + \\mathrm{C}$",
+      "correctAnswer": "(c) x e^{\\int \\mathrm{P}_1 dy} = \\int (\\mathrm{Q}_1 e^{\\int \\mathrm{P}_1 dy}) dy + \\mathrm{C}",
+      "marks_possible": 1,
+      "solution_steps": []
+    },
+    {
+      "number": 2,
+      "questionText": "The general solution of the differential equation $\\frac{y dx - x dy}{y} = 0$ is\n\n$\\text{(a) } xy = \\mathrm{C}$\n$\\text{(b) } x = \\mathrm{Cy}^2$\n$\\text{(c) } y = \\mathrm{Cx}$\n$\\text{(d) } y = \\mathrm{Cx}^2$",
+      "correctAnswer": "(c) y = \\mathrm{Cx}",
+      "marks_possible": 1,
+      "solution_steps": []
+    },
+    {
+      "number": 3,
+      "questionText": "The Integrating Factor of the differential equation $x\\frac{dy}{dx} - y = 2x^2$ is\n\n$\\text{(a) } e^{-x}$\n$\\text{(b) } e^{-y}$\n$\\text{(c) } \\frac{1}{x}$\n$\\text{(d) } x$",
+      "correctAnswer": "(c) \\frac{1}{x}",
+      "marks_possible": 1,
+      "solution_steps": []
+    },
+    {
+      "number": 4,
+      "questionText": "The general solution of the differential equation \\[\\frac{{dy}}{{dx}} = {e^{x + y}}\\] is\n\n$\\text{(a) } \\[{e^x} + {e^{ - y}} = C\\]\n$\\text{(b) } \\[{e^{ - x}} + {e^{ - y}} = C\\]\n$\\text{(c) } \\[{e^{ - x}} + {e^y} = C\\]\n$\\text{(d) } \\[{e^x} + {e^y} = C\\]",
+      "correctAnswer": "(a) \\[{e^x} + {e^{ - y}} = C\\]",
+      "marks_possible": 1,
+      "solution_steps": [
+        "${e^x} + {e^{ - y}} = C$",
+        "$ \\Rightarrow \\frac{{dy}}{{dx}} = {e^x} \\times {e^y}$",
+        "separating variables",
+        "$ \\Rightarrow {e^{ - y}}dy = {e^x}dx$",
+        "Integrating both sides",
+        "$ \\Rightarrow \\int {{e^{ - y}}} dy = \\int {{e^x}dx} $",
+        "$ \\Rightarrow - {e^{ - y}} = {e^x} + c$",
+        "$ \\Rightarrow {e^x} + {e^{ - y}} = - c$",
+        "Or,",
+        "${e^x} + {e^{ - y}} = c\\,\\left( {{\\text{c}}\\,{\\text{is}}\\,{\\text{a}}\\,{\\text{constant}}} \\right)$"
+      ]
+    },
+    {
+      "number": 5,
+      "questionText": "Find the general solution of the differential equation \\[\\frac{{dy}}{{dx}} = \\frac{{x + 1}}{{2 - y}},\\left( {y \\ne 2} \\right)\\].",
+      "correctAnswer": "x^2 + y^2 + 2x - 4y + C = 0",
+      "marks_possible": 3,
+      "solution_steps": [
+        "We have, \\[\\frac{{dy}}{{dx}} = \\frac{{x + 1}}{{2 - y}}\\] …. (1)",
+        "Separating the variables in equation (1), we get",
+        "\\[\\left( {2 - y} \\right)dy = \\left( {x + 1} \\right)dx\\] …. (2)",
+        "Integrating both sides of equation (2), we get",
+        "\\[\\int {\\left( {2 - y} \\right)dy = \\int {\\left( {x + 1} \\right)} } dx\\]",
+        "or \\[2y - \\frac{{{y^2}}}{2} = \\frac{{{x^2}}}{2} + x + {C_1}\\]",
+        "or \\[{x^2} + {y^2} + 2x - 4y + 2{C_1} = 0\\]",
+        "or \\[{x^2} + {y^2} + 2x - 4y + C = 0,\\]",
+        "where \\[C = 2{C_1}\\]",
+        "which is the general solution."
+      ]
+    },
+    {
+      "number": 6,
+      "questionText": "The integrating factor of the differential equation $\\left( {1 - {y^2}} \\right)\\frac{{dx}}{{dy}} + yx = ay\\left( { - 1 < y < 1} \\right){\\text{ is:}}$\n\n$\\text{(a) } \\frac{1}{{{y^2} - 1}}$\n$\\text{(b) } \\frac{1}{{\\sqrt {{y^2} - 1} }}$\n$\\text{(c) } \\frac{1}{{1 - {y^2}}}$\n$\\text{(d) } \\frac{1}{{\\sqrt {1 - {y^2}} }}$",
+      "correctAnswer": "(a) \\frac{1}{{{y^2} - 1}}",
+      "marks_possible": 1,
+      "solution_steps": [
+        "The given differential equation is: $\\left( {1 - {y^2}} \\right)\\frac{{dx}}{{dy}} + yx = ay$",
+        "$ \\Rightarrow \\frac{{dx}}{{dy}} + \\frac{{yx}}{{1 - {y^2}}} = \\frac{{ay}}{{1 - {y^2}}}$",
+        "This is a linear differential equation of the form:",
+        "$\\frac{{dx}}{{dy}} + {p_1}x = {Q_1}$",
+        "Where ${P_1} = \\frac{y}{{1 - {y^2}}}{\\text{ and }}{Q_1} = \\frac{{ay}}{{1 - {y^2}}}$",
+        "Now, $I.F. = {e^{\\int {{p_1}dy} }} = {e^{\\int {\\left( {\\frac{y}{{1 - {y^2}}}} \\right)} dy}} = {e^{ - \\frac{1}{2}\\log \\left( {1 - {y^2}} \\right)}} = {e^{\\log \\left( {\\frac{1}{{\\sqrt {1 - {y^2}} }}} \\right)}} = \\frac{1}{{\\sqrt {1 - {y^2}} }}$"
+      ]
+    },
+    {
+      "number": 7,
+      "questionText": "Find the particular solution of the differential equation \\[\\log \\left( {\\frac{{dy}}{{dx}}} \\right) = 3x + 4y\\], given that y = 0 when x = 0.",
+      "correctAnswer": "4e^(3x) + 3e^(-4y) = 7",
+      "marks_possible": 3,
+      "solution_steps": [
+        "The given equation is: \\[\\log \\left( {\\frac{{dy}}{{dx}}} \\right) = 3x + 4y\\]",
+        "\\[\\begin{gathered}",
+        "\\Rightarrow \\frac{{dy}}{{dx}} = {e^{3x + 4y}} \\\\",
+        "\\Rightarrow {e^{ - 4y}}dy = {e^{3x}}dx\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,\\,{\\text{variables separable}} \\\\",
+        "\\end{gathered} \\]",
+        "Integrating, \\[\\int {{e^{ - 4y}}dy = \\int {{e^{3x}}dx + c} } \\]",
+        "\\[ \\Rightarrow \\frac{{{e^{ - 4y}}}}{{ - 4}} = \\frac{{{e^{3x}}}}{3} + c\\,\\,\\,\\,......\\left( 1 \\right)\\]",
+        "When x = 0, y =0,",
+        "\\[\\therefore - \\frac{1}{4} = \\frac{1}{3} + c \\Rightarrow c = - \\frac{1}{4} - \\frac{1}{3} = - \\frac{7}{{12}}\\]",
+        "Putting in (1), \\[ - \\frac{1}{4} \\cdot \\frac{1}{{{e^{4y}}}} = \\frac{1}{3}{e^{3x}} - \\frac{7}{{12}}\\]",
+        "\\[ \\Rightarrow - 3{e^{ - 4y}} = 4{e^{3x}} - 7 \\Rightarrow 4{e^{3x}} + 3{e^{ - 4y}} = 7\\]",
+        "Which is the reqd. particular solution."
+      ]
+    },
+    {
+      "number": 8,
+      "questionText": "Show that the height of the cylinder of maximum volume that can be inscribed in a sphere of radius R is $\\frac{2R}{\\sqrt{3}}$. Also find the maximum volume.",
+      "correctAnswer": "The height of the cylinder of maximum volume is $\\frac{2R}{\\sqrt{3}}$ and the maximum volume is $\\frac{4\\pi R^3}{3\\sqrt{3}}$.",
+      "marks_possible": 3,
+      "solution_steps": [
+        "Let $R$ be the radius of the sphere, $h$ be the height of the cylinder, and $r$ be the radius of the base of the cylinder.",
+        "The volume of the cylinder is given by $V = \\pi r^2 h$.",
+        "From the geometry of the sphere and the cylinder, we have $r^2 + (\\frac{h}{2})^2 = R^2$, so $r^2 = R^2 - \\frac{h^2}{4}$.",
+        "Substituting this into the volume equation, we get $V = \\pi (R^2 - \\frac{h^2}{4}) h = \\pi (R^2 h - \\frac{h^3}{4})$.",
+        "To maximize the volume, we differentiate $V$ with respect to $h$ and set the derivative to zero.",
+        "$\\frac{dV}{dh} = \\pi (R^2 - \\frac{3h^2}{4}) = 0$.",
+        "So, $R^2 - \\frac{3h^2}{4} = 0$, which implies $\\frac{3h^2}{4} = R^2$, so $h^2 = \\frac{4R^2}{3}$, and $h = \\frac{2R}{\\sqrt{3}}$.",
+        "Now, we find the second derivative to confirm that this is a maximum.",
+        "$\\frac{d^2V}{dh^2} = \\pi (-\\frac{6h}{4}) = -\\frac{3\\pi h}{2}$.",
+        "At $h = \\frac{2R}{\\sqrt{3}}$, $\\frac{d^2V}{dh^2} = -\\frac{3\\pi}{2} (\\frac{2R}{\\sqrt{3}}) = -\\frac{3\\pi R}{\\sqrt{3}} < 0$.",
+        "Since the second derivative is negative, the volume is maximized at $h = \\frac{2R}{\\sqrt{3}}$.",
+        "Now, we find the maximum volume.",
+        "$r^2 = R^2 - \\frac{h^2}{4} = R^2 - \\frac{(\\frac{2R}{\\sqrt{3}})^2}{4} = R^2 - \\frac{\\frac{4R^2}{3}}{4} = R^2 - \\frac{R^2}{3} = \\frac{2R^2}{3}$.",
+        "So, $V_{max} = \\pi r^2 h = \\pi (\\frac{2R^2}{3}) (\\frac{2R}{\\sqrt{3}}) = \\frac{4\\pi R^3}{3\\sqrt{3}}$."
+      ]
+    },
+    {
+      "number": 9,
+      "questionText": "Show that the altitude of the right circular cone of maximum volume that can be inscribed in a sphere of radius $r$ is $\\frac{4r}{3}$.",
+      "correctAnswer": "The altitude of the right circular cone of maximum volume that can be inscribed in a sphere of radius $r$ is $\\frac{4r}{3}$.",
+      "marks_possible": 3,
+      "solution_steps": [
+        "Let $R$ be the radius of the sphere and $h$ be the altitude of the cone inscribed in the sphere. Let $x$ be the radius of the base of the cone.",
+        "The volume of the cone is given by $V = \\frac{1}{3} \\pi x^2 h$.",
+        "From the geometry of the sphere and the cone, we have $x^2 = R^2 - (h - R)^2 = R^2 - (h^2 - 2hR + R^2) = 2hR - h^2$.",
+        "Substituting this into the volume equation, we get $V = \\frac{1}{3} \\pi (2hR - h^2) h = \\frac{1}{3} \\pi (2h^2 R - h^3)$.",
+        "To maximize the volume, we differentiate $V$ with respect to $h$ and set the derivative to zero.",
+        "$\\frac{dV}{dh} = \\frac{1}{3} \\pi (4hR - 3h^2) = 0$.",
+        "So, $4hR - 3h^2 = 0$, which implies $h(4R - 3h) = 0$. Since $h \\neq 0$, we have $4R - 3h = 0$, so $h = \\frac{4R}{3}$.",
+        "Now, we find the second derivative to confirm that this is a maximum.",
+        "$\\frac{d^2V}{dh^2} = \\frac{1}{3} \\pi (4R - 6h)$.",
+        "At $h = \\frac{4R}{3}$, $\\frac{d^2V}{dh^2} = \\frac{1}{3} \\pi (4R - 6(\\frac{4R}{3})) = \\frac{1}{3} \\pi (4R - 8R) = \\frac{1}{3} \\pi (-4R) = -\\frac{4}{3} \\pi R < 0$.",
+        "Since the second derivative is negative, the volume is maximized at $h = \\frac{4R}{3}$.",
+        "Replacing $R$ with $r$, the altitude of the cone is $\\frac{4r}{3}$."
+      ]
+    },
+    {
+      "number": 10,
+      "questionText": "Find the absolute maximum and minimum values of the function $f$ given by\n$$ f(x) = \\cos^2 x + \\sin x, x \\in [0, \\pi] $$",
+      "correctAnswer": "The absolute maximum value is $\\frac{5}{4}$ and the absolute minimum value is $1$.",
+      "marks_possible": 3,
+      "solution_steps": [
+        "Given $f(x) = \\cos^2 x + \\sin x$ for $x \\in [0, \\pi]$.",
+        "We can rewrite $f(x)$ as $f(x) = 1 - \\sin^2 x + \\sin x$.",
+        "Let $u = \\sin x$. Then $f(u) = 1 - u^2 + u$. Since $x \\in [0, \\pi]$, $u = \\sin x \\in [0, 1]$.",
+        "To find the critical points, we differentiate $f(u)$ with respect to $u$:",
+        "$f'(u) = -2u + 1$.",
+        "Setting $f'(u) = 0$, we get $-2u + 1 = 0$, so $u = \\frac{1}{2}$.",
+        "Since $u = \\sin x$, we have $\\sin x = \\frac{1}{2}$, which implies $x = \\frac{\\pi}{6}$ and $x = \\frac{5\\pi}{6}$ in the interval $[0, \\pi]$.",
+        "Now, we evaluate $f(x)$ at the endpoints and the critical points:",
+        "$f(0) = \\cos^2 0 + \\sin 0 = 1^2 + 0 = 1$.",
+        "$f(\\pi) = \\cos^2 \\pi + \\sin \\pi = (-1)^2 + 0 = 1$.",
+        "$f(\\frac{\\pi}{6}) = \\cos^2 \\frac{\\pi}{6} + \\sin \\frac{\\pi}{6} = (\\frac{\\sqrt{3}}{2})^2 + \\frac{1}{2} = \\frac{3}{4} + \\frac{1}{2} = \\frac{5}{4}$.",
+        "$f(\\frac{5\\pi}{6}) = \\cos^2 \\frac{5\\pi}{6} + \\sin \\frac{5\\pi}{6} = (\\frac{-\\sqrt{3}}{2})^2 + \\frac{1}{2} = \\frac{3}{4} + \\frac{1}{2} = \\frac{5}{4}$.",
+        "The absolute maximum value is $\\frac{5}{4}$ and the absolute minimum value is $1$."
+      ]
+    },
+    {
+      "number": 11,
+      "questionText": "Find the maximum profit that a company can make, if the profit function is given by\n$$ p(x) = 41 - 72x - 18x^2 $$",
+      "correctAnswer": "113",
+      "marks_possible": 3,
+      "solution_steps": [
+        "To find the maximum profit, we need to find the critical points of the profit function $p(x) = 41 - 72x - 18x^2$.",
+        "First, find the derivative of $p(x)$ with respect to $x$:",
+        "$p'(x) = -72 - 36x$",
+        "Set $p'(x) = 0$ to find the critical points:",
+        "$-72 - 36x = 0$",
+        "$-36x = 72$",
+        "$x = -2$",
+        "Now, find the second derivative of $p(x)$:",
+        "$p''(x) = -36$",
+        "Since $p''(x) = -36 < 0$, the function has a maximum at $x = -2$.",
+        "Now, find the maximum profit by plugging $x = -2$ into the profit function:",
+        "$p(-2) = 41 - 72(-2) - 18(-2)^2 = 41 + 144 - 18(4) = 41 + 144 - 72 = 185 - 72 = 113$",
+        "The maximum profit is 113."
+      ]
+    },
+    {
+      "number": 12,
+      "questionText": "Find the maximum and the minimum values, if any, of the function $f$ given by\n$$ f(x) = x^2, x \\in \\mathbf{R}. $$",
+      "correctAnswer": "Minimum value = 0 at x = 0; no maximum value on R.",
+      "marks_possible": 3,
+      "solution_steps": [
+        "From the graph of the given function (Fig 6.8), we",
+        "have $f(x) = 0$ if $x = 0$. Also",
+        "$$ f(x) \\geq 0, \\text{for all } x \\in \\mathbf{R}. $$",
+        "Therefore, the minimum value of $f$ is 0 and the point of",
+        "minimum value of $f$ is $x = 0$. Further, it may be observed",
+        "from the graph of the function that $f$ has no maximum value",
+        "and hence no point of maximum value of $f$ in $\\mathbf{R}$."
+      ]
+    },
+    {
+      "number": 13,
+      "questionText": "The maximum value of ${\\left[ {x\\left( {x - 1} \\right) + 1} \\right]^{\\frac{1}{3}}},\\,\\,0 \\leqslant x \\leqslant 1$ is\n\n$\\text{(a) } {\\left( {\\frac{1}{3}} \\right)^{\\frac{1}{3}}}$\n$\\text{(b) } \\frac{1}{2}$\n$\\text{(c) } 1$\n$\\text{(d) } \\text{zero}$",
+      "correctAnswer": "(c) 1",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Let $f\\left( x \\right) = {\\left[ {x\\left( {x - 1} \\right) + 1} \\right]^{\\frac{1}{3}}},\\,\\,0 \\leqslant x \\leqslant 1 = {\\left( {{x^2} - x + 1} \\right)^{\\frac{1}{3}}}$",
+        "On differentiating w.r.t. $x$, we get",
+        "$f'\\left( x \\right) = \\frac{1}{3}{\\left( {{x^2} - x + 1} \\right)^{\\frac{1}{3} - 1}}\\left( {2x - 1} \\right) = \\frac{{1\\left( {2x - 1} \\right)}}{{3{{\\left( {{x^2} - x + 1} \\right)}^{\\frac{2}{3}}}}}$",
+        "Now, put $f'\\left( x \\right) = 0 \\Rightarrow 2x - 1 = 0 \\Rightarrow x = \\frac{1}{2} \\in \\left[ {0,\\,\\,1} \\right]$.",
+        "So, $x = \\frac{1}{2}$ is a critical point.",
+        "Now, we evaluate the value of $f$ at critical point $x = \\frac{1}{2}$ and at the end points of the interval [0, 1].",
+        "At $x = 0$, $f\\left( 0 \\right) = {\\left( {0 - 0 + 1} \\right)^{\\frac{1}{3}}} = 1$",
+        "At $x = 1$, $f\\left( 1 \\right) = {\\left( {1 - 1 + 1} \\right)^{\\frac{1}{3}}} = 1$",
+        "At $x = \\frac{1}{2}$, $f\\left( {\\frac{1}{2}} \\right) = {\\left( {\\frac{1}{4} - \\frac{1}{2} + 1} \\right)^{\\frac{1}{3}}} = {\\left( {\\frac{3}{4}} \\right)^{\\frac{1}{3}}}$",
+        "$\\therefore $ Maximum value of $f$ ($x$) is 1 at $x$ = 0, 1. Hence, (c) is the correct option."
+      ]
+    },
+    {
+      "number": 14,
+      "questionText": "The point on the curve \\[{x^2} = 2y\\] which is nearest to the point \\[\\left( {0,5} \\right)\\] can be :\n\n$\\text{(a) } \\[\\left( {2\\sqrt 2 ,4} \\right)\\]\n$\\text{(b) } \\[\\left( {2\\sqrt 2 ,0} \\right)\\]\n$\\text{(c) } \\[(0,0)\\]\n$\\text{(d) } \\[(2,2)\\]",
+      "correctAnswer": "(a) \\[\\left( {2\\sqrt 2 ,4} \\right)\\]",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Let \\[A\\left( {0,5} \\right)\\] and required point is \\[P\\left( {x,\\frac{{{x^2}}}{2}} \\right)\\]",
+        "\\[Z = A{P^2} = {x^2} + {\\left( {\\frac{{{x^2}}}{2} - 5} \\right)^2}\\]",
+        "\\[\\frac{{dZ}}{{dx}} = 2x + 2\\left( {\\frac{{{x^2}}}{2} - 5} \\right)(x)\\]",
+        "\\[\\frac{{dZ}}{{dx}} = 0 \\Rightarrow 2x\\left( {1 + \\frac{{{x^2}}}{2} - 5} \\right) = 0\\]",
+        "\\[ \\Rightarrow x\\left( {{x^2} - 8} \\right) = 0\\]",
+        "\\[x = 0, \\pm 2\\sqrt 2 \\]",
+        "Again \\[\\frac{{dZ}}{{dx}} = 2x\\left( {\\frac{{{x^2}}}{2} - 4} \\right) = {x^3} - 8x\\]",
+        "\\[\\frac{{{d^2}Z}}{{d{x^2}}} = 3{x^2} - 8\\]",
+        "So at \\[x = 0,\\,\\,\\frac{{{d^2}Z}}{{d{x^2}}} = - 8 0\\]",
+        "Thus \\[Z\\] is minimum for \\[x = \\pm 2\\sqrt 2 \\]",
+        "Hence \\[P\\left( { \\pm 2\\sqrt 2 ,4} \\right)\\]",
+        "Hence out of given options required point can be \\[\\left( {2\\sqrt 2 ,4} \\right)\\,.\\]"
+      ]
+    },
+    {
+      "number": 15,
+      "questionText": "Find all points of local maxima and local minima of the function $f$ given by\n\\[f\\left( x \\right) = {x^3} - 3x + 3.\\]",
+      "correctAnswer": "x = -1 is a point of local maxima; x = 1 is a point of local minima.",
+      "marks_possible": 3,
+      "solution_steps": [
+        "We have",
+        "\\[f\\left( x \\right) = {x^3} - 3x + 3\\]",
+        "\\[ \\Rightarrow f'\\left( x \\right) = 3{x^2} - 3 = 3\\left( {x - 1} \\right)\\left( {x + 1} \\right)\\]",
+        "\\[ \\Rightarrow f'\\left( x \\right) = 0\\,\\,{\\text{at}}\\,\\,x = 1\\,\\,{\\text{and}}\\,\\,x = - 1\\]",
+        "Thus critical points are $x$ = -1 and $x$ = 1.",
+        "Now checking at these critical points.",
+        "Therefore, by first derivative test, $x$ = -1 is a point of local maxima and $x$ = 1 is a point of local minima."
+      ]
+    },
+    {
+      "number": 16,
+      "questionText": "The point (0,5) is closest to the curve x2 = 2y at\n\n$\\text{(a) } \\[\\left( {2\\sqrt 2 ,0} \\right)\\]\n$\\text{(b) } \\text{(0, 0)}$\n$\\text{(c) } \\text{(2, 2)}$\n$\\text{(d) } \\text{None of these}$",
+      "correctAnswer": "(d) \\text{None of these}",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Let a point on the curve be (h, k)",
+        "Then h2 = 2k …..(i)",
+        "Distance between point (0, 5) and (h, k) = \\[D = \\sqrt {{h^2} + {{(k - 5)}^2}} \\]",
+        "So, at k = 4 function $D$ must be minimum.",
+        "Then required point on the given curve will be \\[( \\pm 2\\sqrt 2 ,\\,\\,4)\\]."
+      ]
+    },
+    {
+      "number": 17,
+      "questionText": "The equation of a curve passing through \\[\\left( {2,\\frac{7}{2}} \\right)\\] and having gradient \\[1 - \\frac{1}{{{x^2}}}\\] at \\[\\left( {x,y} \\right)\\] is\n\n$\\text{(a) } \\[y = {x^2} + x + 1\\]\n$\\text{(b) } \\[xy = {x^2} + x + 1\\]\n$\\text{(c) } \\[xy = x + 1\\]\n$\\text{(d) } \\text{none of these}$",
+      "correctAnswer": "(b) \\[xy = {x^2} + x + 1\\]",
+      "marks_possible": 1,
+      "solution_steps": [
+        "\\[\\frac{{dy}}{{dx}} = 1 - \\frac{1}{{{x^2}}}\\]",
+        "\\[ \\Rightarrow y = x + \\frac{1}{x} + c\\]",
+        "\\[\\frac{7}{2} = 2 + \\frac{1}{2} + c \\Rightarrow c = 1\\]",
+        "So,",
+        "\\[y = x + \\frac{1}{{x + 1}} + 1\\]"
+      ]
+    },
+    {
+      "number": 18,
+      "questionText": "Area of the greatest rectangle that can be inscribed in the ellipse \\[\\frac{{{x^2}}}{{{a^2}}} + \\frac{{{y^2}}}{{{b^2}}} = 1\\] is\n\n$\\text{(a) } \\text{ab}$\n$\\text{(b) } \\text{2 ab}$\n$\\text{(c) } \\text{a/b}$\n$\\text{(d) } \\[\\sqrt {ab} \\]",
+      "correctAnswer": "(b) \\text{2 ab}",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Required area = \\[{\\text{2ab}}\\]."
+      ]
+    },
+    {
+      "number": 19,
+      "questionText": "The maximum value of xy subject to x + y = 8, is\n\n$\\text{(a) } \\text{8}$\n$\\text{(b) } \\text{16}$\n$\\text{(c) } \\text{20}$\n$\\text{(d) } \\text{24}$",
+      "correctAnswer": "(b) \\text{16}",
+      "marks_possible": 1,
+      "solution_steps": [
+        "\\[z = x\\left( {8 - x} \\right) = 8x - {x^2}\\]",
+        "\\[\\frac{{dz}}{{dx}} = 8 - 2x = 0 \\Rightarrow x = 4\\]",
+        "\\[{z_{\\max }} = 4 \\times 4 = 16\\]"
+      ]
+    },
+    {
+      "number": 20,
+      "questionText": "A triangular park is enclosed on two sides by a fence and on the third side by a straight river bank. The two sides having fence are of same length x. The maximum area enclosed by the park is\n\n$\\text{(a) } \\[\\frac{3}{2}{x^2}\\]\n$\\text{(b) } \\[\\sqrt {\\frac{{{x^3}}}{8}} \\]\n$\\text{(c) } \\[\\frac{1}{2}{x^2}\\]\n$\\text{(d) } \\[\\pi \\]x 2",
+      "correctAnswer": "(c) \\[\\frac{1}{2}{x^2}\\]",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Area of triangle ABC = \\[\\frac{1}{2}{\\text{base}} \\times {\\text{height}}\\]",
+        "\\[ = \\frac{1}{2}{x^2}\\,\\sin \\,2\\alpha \\,\\, \\leqslant \\,\\frac{1}{2}{x^2}\\]",
+        "maximum area of \\[\\Delta {\\text{ABC}}\\,{\\text{ = }}\\frac{{\\text{1}}}{{\\text{2}}}{{\\text{x}}^{\\text{2}}}\\]"
+      ]
+    }
+  ]
+}

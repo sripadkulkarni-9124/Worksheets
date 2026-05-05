@@ -60,10 +60,13 @@ class AutoMark(BaseModel):
 
 class Session(SQLModel, table=True):
     id: str = Field(primary_key=True)
-    image_data_url: str
-    result_json: str
+    # Legacy single-page fields (kept for back-compat)
+    image_data_url: str = ""
+    result_json: str = "{}"
     auto_marks_json: str = Field(default='[]')
-    timestamp: str = Field(index=True)  # indexed for list ordering
+    # New multi-page field: JSON of [{imageDataUrl, result, autoMarks}, ...]
+    pages_json: str = Field(default='[]')
+    timestamp: str = Field(index=True)
 
 
 class ChatMessage(BaseModel):
@@ -80,3 +83,32 @@ class ChatEntry(SQLModel, table=True):
     role: str
     content: str
     timestamp: str
+
+
+# ─── Worksheet Template (teacher-uploaded question set) ────────────
+class WorksheetTemplate(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    title: str
+    subject: Optional[str] = None
+    chapter: Optional[str] = None
+    topic: Optional[str] = None
+    questions_json: str          # serialized list of TemplateQuestion
+    timestamp: str = Field(index=True)
+
+
+class TemplateQuestion(BaseModel):
+    """Single question in a teacher-uploaded template."""
+    number: int
+    questionText: str
+    correctAnswer: str
+    marks_possible: int = 1
+    solution_steps: Optional[list[str]] = None
+
+
+class TemplatePayload(BaseModel):
+    """Full template payload for upload."""
+    title: str
+    subject: Optional[str] = None
+    chapter: Optional[str] = None
+    topic: Optional[str] = None
+    questions: list[TemplateQuestion]

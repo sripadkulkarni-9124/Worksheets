@@ -1,5 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from database import get_db
+from models import WorksheetTemplate, TemplateQuestion
 import base64
 import json
 import asyncio
@@ -35,6 +39,16 @@ def _validate_image(b64: str, mime: str) -> bytes:
 class EvaluateRequest(BaseModel):
     imageBase64: str
     mimeType: str = "image/jpeg"
+    # New: template-driven evaluation. Provide either templateId (stored) or questions (inline).
+    templateId: str | None = None
+    questions: list[dict] | None = None
+    worksheetTitle: str | None = None
+    subject: str | None = None
+    chapter: str | None = None
+    topic: str | None = None
+    grade: int | None = None
+    pageNumber: int | None = None
+    promptVersion: str | None = None  # "v1" | "v2" (default v2)
 
 
 async def _call_gemini_with_retry(client, model, contents, config, max_retries=1):
@@ -80,13 +94,20 @@ def _sanitize_bboxes(questions: list[dict]) -> list[dict]:
         return questions
 
     # ── Parse raw boxes ──
-    raw_boxes = []  # (ymin, xmin, ymax, xmax) or None
+    # Supports three shapes from Gemini:
+    #   (1) v2 object:   bbox = {x, y, w, h} normalized 0-1     → scale ×1000
+    #   (2) legacy list: box_2d = [ymin, xmin, ymax, xmax] 0-1000
+    #   (3) legacy list: bbox   = [y_start, y_end] 0-100
+    raw_boxes = []  # (ymin, xmin, ymax, xmax) on 0-1000 scale, or None
     for q in questions:
-        bb = q.get("box_2d") or q.get("bbox")
-        if bb and isinstance(bb, list) and len(bb) >= 4:
+        bb = q.get("bbox") if isinstance(q.get("bbox"), dict) else (q.get("box_2d") or q.get("bbox"))
+        if isinstance(bb, dict) and all(k in bb for k in ("x", "y", "w", "h")):
+            x = float(bb["x"]); y = float(bb["y"])
+            w = float(bb["w"]); h = float(bb["h"])
+            raw_boxes.append((y * 1000, x * 1000, (y + h) * 1000, (x + w) * 1000))
+        elif bb and isinstance(bb, list) and len(bb) >= 4:
             raw_boxes.append(tuple(float(v) for v in bb[:4]))
         elif bb and isinstance(bb, list) and len(bb) == 2:
-            # Legacy [y_start, y_end] — add default X
             raw_boxes.append((float(bb[0]), 10.0, float(bb[1]), 850.0))
         else:
             raw_boxes.append(None)
@@ -193,20 +214,39 @@ def _sanitize_bboxes(questions: list[dict]) -> list[dict]:
         else:
             questions[i]["answer_box_norm"] = None
 
-        # Normalize errors array — pin_points and highlight_boxes
+        # Normalize errors array — supports v2 {location, highlight} object shape
+        # and legacy {pin_point, highlight_box} list shape
         errors = questions[i].get("errors", [])
         if isinstance(errors, list):
             for err in errors:
-                pp = err.get("pin_point")
-                if pp and isinstance(pp, list) and len(pp) >= 2:
-                    err["pin_point_norm"] = [float(pp[0]) / 1000, float(pp[1]) / 1000]
+                loc = err.get("location")
+                if isinstance(loc, dict) and "x" in loc and "y" in loc:
+                    err["pin_point_norm"] = [float(loc["y"]), float(loc["x"])]
                 else:
-                    err["pin_point_norm"] = None
-                hb = err.get("highlight_box")
-                if hb and isinstance(hb, list) and len(hb) >= 4:
-                    err["highlight_box_norm"] = [float(v) / 1000 for v in hb[:4]]
+                    pp = err.get("pin_point")
+                    if pp and isinstance(pp, list) and len(pp) >= 2:
+                        err["pin_point_norm"] = [float(pp[0]) / 1000, float(pp[1]) / 1000]
+                    else:
+                        err["pin_point_norm"] = None
+
+                hl = err.get("highlight")
+                if isinstance(hl, dict) and all(k in hl for k in ("x", "y", "w", "h")):
+                    x = float(hl["x"]); y = float(hl["y"])
+                    w = float(hl["w"]); h = float(hl["h"])
+                    err["highlight_box_norm"] = [y, x, y + h, x + w]
                 else:
-                    err["highlight_box_norm"] = None
+                    hb = err.get("highlight_box")
+                    if hb and isinstance(hb, list) and len(hb) >= 4:
+                        err["highlight_box_norm"] = [float(v) / 1000 for v in hb[:4]]
+                    else:
+                        err["highlight_box_norm"] = None
+
+                # New v2 fields — pass through, coerce stepRef to int
+                if "stepRef" in err and err["stepRef"] is not None:
+                    try:
+                        err["stepRef"] = int(err["stepRef"])
+                    except (TypeError, ValueError):
+                        err["stepRef"] = None
             questions[i]["errors"] = errors
 
     # ── Log ──
@@ -225,9 +265,52 @@ def _sanitize_bboxes(questions: list[dict]) -> list[dict]:
     return questions
 
 
+async def _load_template_questions(req: EvaluateRequest, db: AsyncSession) -> tuple[list[dict], dict]:
+    """
+    Resolve the question set for this evaluation call.
+    Returns (questions_list, meta_dict).
+    meta_dict: {worksheetTitle, subject, chapter, topic}
+    """
+    if req.templateId:
+        result = await db.execute(select(WorksheetTemplate).where(WorksheetTemplate.id == req.templateId))
+        tpl = result.scalar_one_or_none()
+        if not tpl:
+            raise HTTPException(status_code=404, detail="Template not found")
+        qs = json.loads(tpl.questions_json)
+        meta = {
+            "worksheetTitle": tpl.title,
+            "subject": tpl.subject,
+            "chapter": tpl.chapter,
+            "topic": tpl.topic,
+        }
+        return qs, meta
+
+    if req.questions:
+        # Validate inline
+        validated = []
+        for q in req.questions:
+            try:
+                tq = TemplateQuestion(**q)
+                validated.append(tq.model_dump())
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid question: {e}")
+        meta = {
+            "worksheetTitle": req.worksheetTitle or "Untitled Worksheet",
+            "subject": req.subject,
+            "chapter": req.chapter,
+            "topic": req.topic,
+        }
+        return validated, meta
+
+    raise HTTPException(
+        status_code=400,
+        detail="Must provide either templateId or questions array",
+    )
+
+
 @router.post("/evaluate")
-async def evaluate(req: EvaluateRequest):
-    from gemini_client import get_client, MODEL, EVALUATE_PROMPT
+async def evaluate(req: EvaluateRequest, db: AsyncSession = Depends(get_db)):
+    from gemini_client import get_client, MODEL, EVALUATE_PROMPT, EVALUATE_PROMPT_V2
     from google.genai import types
 
     client = get_client()
@@ -235,17 +318,49 @@ async def evaluate(req: EvaluateRequest):
         raise HTTPException(status_code=503, detail="Gemini API key not configured. Set GEMINI_API_KEY in .env")
 
     raw_bytes = _validate_image(req.imageBase64, req.mimeType)
+
+    version = (req.promptVersion or "v2").lower()
+
+    # Template is required for v2 only; v1 reads full worksheet directly.
+    if version == "v1":
+        template_questions = []
+        meta = {
+            "worksheetTitle": req.worksheetTitle or "Untitled Worksheet",
+            "subject": req.subject,
+            "chapter": req.chapter,
+            "topic": req.topic,
+        }
+    else:
+        template_questions, meta = await _load_template_questions(req, db)
+
+    if version == "v1":
+        full_prompt = EVALUATE_PROMPT
+    else:
+        input_json = {
+            "grade": req.grade or 0,
+            "subject": (meta.get("subject") or req.subject or "").lower() or "unknown",
+            "page_number": req.pageNumber or 1,
+            "questions": template_questions,
+        }
+        questions_json_str = json.dumps(input_json, ensure_ascii=False, indent=2)
+        full_prompt = (
+            EVALUATE_PROMPT_V2
+            + "\n\n---\nPROVIDED INPUT JSON:\n"
+            + questions_json_str
+        )
+    print(f"[EVALUATE] Using prompt version={version}")
+
     image_part = types.Part.from_bytes(data=raw_bytes, mime_type=req.mimeType)
 
     config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(thinking_budget=4096),
         response_mime_type="application/json",
-        temperature=0.5,
+        temperature=0.3,  # lower for deterministic OCR + grading
     )
 
     try:
         data = await _call_gemini_with_retry(
-            client, MODEL, [EVALUATE_PROMPT, image_part], config
+            client, MODEL, [full_prompt, image_part], config
         )
     except json.JSONDecodeError:
         raise HTTPException(status_code=502, detail="AI returned invalid response. Please try again.")
@@ -256,4 +371,10 @@ async def evaluate(req: EvaluateRequest):
     if "questions" in data and isinstance(data["questions"], list):
         data["questions"] = _sanitize_bboxes(data["questions"])
 
-    return {"success": True, **data}
+    matched = len(data.get("questions", []))
+    if matched == 0:
+        print(f"[EVALUATE] No handwritten answers matched the template "
+              f"({len(template_questions)} provided). Likely mismatched template.")
+
+    # Attach meta (worksheet title, subject etc.) from template/inline input
+    return {"success": True, **meta, **data}

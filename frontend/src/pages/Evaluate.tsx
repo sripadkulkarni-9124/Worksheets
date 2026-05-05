@@ -3,11 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { fetchSession, annotateWorksheet, updateSessionMarks } from '../api'
 import { EvaluationSession, EvaluatedQuestion } from '../types'
 import AnnotationStage from '../components/AnnotationStage'
-import StepByStep from '../components/StepByStep'
+import ErrorBoundary from '../components/ErrorBoundary'
+import EvalPanel from '../components/EvalPanel/EvalPanel'
 import ReattemptModal from '../components/ReattemptModal'
 import AskVedChat from '../components/AskVedChat'
 import CaptureModal from '../components/CaptureModal'
 import { preprocessImage, evaluateWorksheet, saveSession } from '../api'
+import MathText from '../components/MathText'
 
 const STATUS_CONFIG = {
   correct: {
@@ -56,6 +58,9 @@ export default function Evaluate() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeQ, setActiveQ] = useState(0)
+  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null)
+  const [highlightedStep, setHighlightedStep] = useState<number | null>(null)
+  const [activePage, setActivePage] = useState(0)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [showReattempt, setShowReattempt] = useState(false)
@@ -65,6 +70,19 @@ export default function Evaluate() {
   const [annotating, setAnnotating] = useState(false)
   const [annotWarning, setAnnotWarning] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
+
+  // Reset active question when switching pages
+  useEffect(() => { setActiveQ(0) }, [activePage])
+  // Clear annotation highlight when active Q changes
+  useEffect(() => { setActiveAnnotationId(null); setHighlightedStep(null) }, [activeQ])
+
+  const handleAnnotationSelect = useCallback((annId: string | null, stepRef: number | null) => {
+    if (annId === null || activeAnnotationId === annId) {
+      setActiveAnnotationId(null); setHighlightedStep(null)
+    } else {
+      setActiveAnnotationId(annId); setHighlightedStep(stepRef)
+    }
+  }, [activeAnnotationId])
 
   // Stopwatch for processing overlay
   useEffect(() => {
@@ -97,6 +115,28 @@ export default function Evaluate() {
     }
   }, [loading])
 
+  // Sync activeQ to scroll position in right panel — topmost visible card wins
+  useEffect(() => {
+    const root = rightPanelRef.current
+    if (!root) return
+    const onScroll = () => {
+      if (Date.now() - lastProgrammaticScrollRef.current < 600) return
+      const rootRect = root.getBoundingClientRect()
+      const anchor = rootRect.top + 80
+      let bestIdx = 0
+      let bestDist = Infinity
+      qCardRefs.current.forEach((el, i) => {
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const d = Math.abs(r.top - anchor)
+        if (r.top <= anchor + 20 && d < bestDist) { bestDist = d; bestIdx = i }
+      })
+      setActiveQ(prev => prev === bestIdx ? prev : bestIdx)
+    }
+    root.addEventListener('scroll', onScroll, { passive: true })
+    return () => root.removeEventListener('scroll', onScroll)
+  }, [session])
+
   // Load session
   useEffect(() => {
     if (!id) return
@@ -128,8 +168,13 @@ export default function Evaluate() {
             const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg'
             const annotResult = await annotateWorksheet(base64, mimeType, questions)
             const marks = annotResult.marks || []
-            await updateSessionMarks(id, marks)
-            setSession(prev => prev ? { ...prev, autoMarks: marks } : prev)
+            await updateSessionMarks(id, marks, 0)
+            setSession(prev => {
+              if (!prev) return prev
+              const newPages = prev.pages ? [...prev.pages] : undefined
+              if (newPages && newPages[0]) newPages[0] = { ...newPages[0], autoMarks: marks }
+              return { ...prev, autoMarks: marks, ...(newPages ? { pages: newPages } : {}) }
+            })
             // Check if fewer bboxes than questions
             const detectedBboxes = marks.filter((m: { type: string }) => m.type === 'bbox').length
             if (detectedBboxes < questions.length) {
@@ -149,8 +194,15 @@ export default function Evaluate() {
       .finally(() => setLoading(false))
   }, [id])
 
+  const rightPanelRef = useRef<HTMLDivElement>(null)
+  const qCardRefs = useRef<(HTMLDivElement | null)[]>([])
+  const lastProgrammaticScrollRef = useRef<number>(0)
+
   const handleQuestionClick = useCallback((qi: number) => {
     setActiveQ(qi)
+    lastProgrammaticScrollRef.current = Date.now()
+    const node = qCardRefs.current[qi]
+    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
   const handleCapture = useCallback(async (base64: string, mimeType: string, dataUrl: string) => {
@@ -198,9 +250,46 @@ export default function Evaluate() {
     }
   }, [navigate])
 
+  const handleCaptureMulti = useCallback(async (files: Array<{ base64: string; mimeType: string; dataUrl: string }>) => {
+    setShowCapture(false)
+    setProcessing(true)
+    const collected: Array<{ imageDataUrl: string; result: unknown; autoMarks: unknown[] }> = []
+    try {
+      for (let i = 0; i < files.length; i++) {
+        setProcessingStep(`Processing page ${i + 1} of ${files.length}...`)
+        const f = files[i]
+        let imgB64 = f.base64, imgMime = f.mimeType, imgDataUrl = f.dataUrl
+        try {
+          const pp = await preprocessImage(f.base64, f.mimeType)
+          if (pp.corrected) { imgB64 = pp.imageBase64; imgMime = pp.mimeType; imgDataUrl = pp.dataUrl }
+        } catch { /* use original */ }
+        const evalResult = await evaluateWorksheet(imgB64, imgMime)
+        const questions = evalResult.questions || []
+        let autoMarks: unknown[] = []
+        if (questions.length > 0) {
+          try {
+            const annotResult = await annotateWorksheet(imgB64, imgMime, questions)
+            autoMarks = annotResult.marks || []
+          } catch { autoMarks = [] }
+        }
+        collected.push({ imageDataUrl: imgDataUrl, result: evalResult, autoMarks })
+      }
+      if (collected.length === 0) return
+      setProcessingStep('Saving session...')
+      const { saveSessionMulti } = await import('../api')
+      const { id: newId } = await saveSessionMulti(collected)
+      navigate(`/evaluate/${newId}`)
+    } catch (err) {
+      console.error('Multi-file processing failed:', err)
+    } finally {
+      setProcessing(false)
+      setProcessingStep('')
+    }
+  }, [navigate])
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0F1923] flex items-center justify-center">
+      <div className="min-h-screen  flex items-center justify-center">
         <div className="text-center space-y-4">
           <div className="w-12 h-12 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-white/60">Loading session...</p>
@@ -211,7 +300,7 @@ export default function Evaluate() {
 
   if (error || !session) {
     return (
-      <div className="min-h-screen bg-[#0F1923] flex items-center justify-center">
+      <div className="min-h-screen  flex items-center justify-center">
         <div className="text-center space-y-4">
           <p className="text-red-400 text-lg">{error || 'Session not found'}</p>
           <button
@@ -225,42 +314,97 @@ export default function Evaluate() {
     )
   }
 
-  const { result, imageDataUrl, autoMarks } = session
+  // Multi-page support: use pages[activePage] if present, else fall back to flat fields
+  const pages = (session.pages && session.pages.length > 0)
+    ? session.pages
+    : [{ imageDataUrl: session.imageDataUrl, result: session.result, autoMarks: session.autoMarks }]
+  const pageCount = pages.length
+  const safePageIdx = Math.min(activePage, pageCount - 1)
+  const currentPage = pages[safePageIdx]
+  const result = currentPage.result
+  const imageDataUrl = currentPage.imageDataUrl
+  const autoMarks = currentPage.autoMarks
   const questions: EvaluatedQuestion[] = result.questions || []
   const activeQuestion = questions[activeQ] || questions[0]
 
-  const scoreCorrect = questions.filter(q => q.status === 'correct').length
-  const scorePct = questions.length > 0 ? Math.round((scoreCorrect / questions.length) * 100) : 0
+  // Aggregate score across all pages
+  const aggScore = (() => {
+    let correct = 0, total = 0
+    for (const p of pages) {
+      const qs = p.result?.questions || []
+      total += qs.length
+      correct += qs.filter(q => q.status === 'correct').length
+    }
+    return { correct, total, pct: total > 0 ? Math.round((correct / total) * 100) : 0 }
+  })()
+
+  // No-match guard — template didn't match student's work
+  if (!loading && questions.length === 0) {
+    return (
+      <div className="min-h-[100dvh]  flex items-center justify-center px-6">
+        <div className="max-w-md text-center space-y-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-8">
+          <div className="text-4xl">🤔</div>
+          <h2 className="text-white text-xl font-bold">No matching answers found</h2>
+          <p className="text-white/70 text-sm leading-relaxed">
+            VED couldn't match any question from <span className="text-amber-300 font-medium">"{result.worksheetTitle || 'the selected question set'}"</span> to the student's handwritten work.
+          </p>
+          <div className="text-white/50 text-xs space-y-1 bg-white/5 rounded-lg p-3 text-left">
+            <p>Possible causes:</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              <li>Template doesn't match the worksheet the student solved</li>
+              <li>Handwriting was too unclear to OCR</li>
+              <li>Student used different question numbering</li>
+            </ul>
+          </div>
+          {imageDataUrl && (
+            <img src={imageDataUrl} alt="Captured" className="mx-auto max-h-40 rounded-lg border border-white/10" />
+          )}
+          <div className="flex gap-3 justify-center pt-2">
+            <button onClick={() => navigate('/')} className="px-4 py-2 rounded-xl bg-white/10 text-white text-sm hover:bg-white/15">
+              ← Back to Home
+            </button>
+            <button onClick={() => setShowCapture(true)} className="px-4 py-2 rounded-xl bg-orange-500 text-white text-sm hover:bg-orange-400">
+              Retake Photo
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // (per-page score available via questions.filter; aggScore above aggregates across pages)
   const cfg = activeQuestion ? STATUS_CONFIG[activeQuestion.status] : STATUS_CONFIG.unanswered
 
   return (
-    <div className="h-[100dvh] bg-[#0F1923] flex flex-col overflow-hidden">
+    <div className="h-[100dvh] flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#1A2332] to-[#1e2d42] border-b border-white/10 px-5 py-3 flex-shrink-0">
+      <div className="ved-header px-5 py-3 flex-shrink-0">
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/')}
-            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/15 transition-colors flex items-center justify-center text-white/70"
+            className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 transition-colors flex items-center justify-center text-white"
           >
             ←
           </button>
           <div className="flex-1 min-w-0">
-            <p className="text-white font-semibold text-sm truncate">{result.worksheetTitle}</p>
-            <p className="text-white/40 text-xs">{result.subject} • {result.chapter}</p>
+            <p className="text-white font-semibold text-sm truncate drop-shadow">{result.worksheetTitle}</p>
+            <p className="text-white/70 text-xs">{result.subject} • {result.chapter}</p>
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             {annotating && (
-              <div className="flex items-center gap-1.5 text-amber-400 text-xs">
-                <div className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />
+              <div className="flex items-center gap-1.5 text-amber-100 text-xs">
+                <div className="w-3 h-3 border border-amber-100 border-t-transparent rounded-full animate-spin" />
                 Annotating...
               </div>
             )}
-            <div className={`px-3 py-1.5 rounded-xl text-sm font-bold ${scorePct >= 70 ? 'bg-green-500/20 text-green-300' : scorePct >= 40 ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'}`}>
-              {scorePct}% ({scoreCorrect}/{questions.length})
+            <div className={`px-3 py-1.5 rounded-xl text-sm font-bold backdrop-blur ${aggScore.pct >= 70 ? 'bg-green-500/30 text-green-50' : aggScore.pct >= 40 ? 'bg-amber-500/30 text-amber-50' : 'bg-red-500/30 text-red-50'}`}
+                 title={pageCount > 1 ? `Aggregate across ${pageCount} pages` : 'Score'}>
+              {aggScore.pct}% ({aggScore.correct}/{aggScore.total})
+              {pageCount > 1 && <span className="ml-1 text-[10px] opacity-80">• {pageCount}p</span>}
             </div>
             <button
               onClick={() => setShowCapture(true)}
-              className="px-3 py-1.5 rounded-xl bg-orange-500/20 text-orange-300 text-xs font-medium hover:bg-orange-500/30 transition-colors"
+              className="px-3 py-1.5 rounded-xl bg-white/20 text-white text-xs font-medium hover:bg-white/30 transition-colors backdrop-blur"
             >
               Scan Again
             </button>
@@ -268,183 +412,84 @@ export default function Evaluate() {
         </div>
       </div>
 
+      {/* (page switcher moved to bottom of LEFT panel below) */}
+
       {/* Two-panel body — stacks on mobile, side-by-side on md+ */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0 p-3 gap-3">
         {/* LEFT: Worksheet image + Konva stage */}
-        <div className="w-full h-[55vh] md:h-auto md:w-[52%] flex flex-col border-b md:border-b-0 md:border-r border-white/10 bg-[#111827] min-h-0 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 flex-shrink-0">
-            <p className="text-white/50 text-xs font-medium uppercase tracking-wide">Annotated Worksheet</p>
+        <div className="ved-panel--worksheet rounded-3xl w-full h-[55vh] md:h-auto md:w-[52%] flex flex-col min-h-0 overflow-hidden">
+          <div className="ved-glass-strip flex items-center justify-between px-4 py-2.5 border-b border-white/30 flex-shrink-0">
+            <p className="text-slate-700 text-xs font-semibold uppercase tracking-wide">Annotated Worksheet</p>
             <button
               onClick={() => setShowFeedback(f => !f)}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
                 showFeedback
-                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500/40'
-                  : 'bg-white/5 text-white/50 border border-white/10 hover:text-white/70'
+                  ? 'bg-amber-500/40 text-amber-900 border border-amber-500/50'
+                  : 'bg-white/50 text-slate-700 border border-white/60 hover:bg-white/70'
               }`}
             >
-              {showFeedback ? 'Hide Feedback' : 'Show Feedback'}
+              {showFeedback ? 'Hide Markings' : 'Show Markings'}
             </button>
           </div>
 
           {/* Stage container */}
           <div ref={leftPanelRef} className="flex-1 overflow-hidden relative">
             {containerSize.width > 0 && containerSize.height > 0 && (
-              <AnnotationStage
-                imageDataUrl={imageDataUrl}
-                autoMarks={autoMarks || []}
-                activeQ={activeQ}
-                onQuestionClick={handleQuestionClick}
-                showFeedback={showFeedback}
-                questions={questions}
-                containerSize={containerSize}
-              />
+              <ErrorBoundary name="AnnotationStage">
+                <AnnotationStage
+                  imageDataUrl={imageDataUrl}
+                  autoMarks={autoMarks || []}
+                  activeQ={activeQ}
+                  onQuestionClick={handleQuestionClick}
+                  onAnnotationClick={handleAnnotationSelect}
+                  activeAnnotationId={activeAnnotationId}
+                  showFeedback={showFeedback}
+                  questions={questions}
+                  containerSize={containerSize}
+                />
+              </ErrorBoundary>
             )}
           </div>
 
-          {/* Page nav bar */}
-          <div className="px-4 py-2.5 border-t border-white/10 flex-shrink-0">
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {questions.map((q, i) => {
-                const qcfg = STATUS_CONFIG[q.status]
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setActiveQ(i)}
-                    className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                      i === activeQ
-                        ? `${qcfg.dot} text-white scale-110 shadow-lg`
-                        : `bg-white/10 text-white/50 hover:bg-white/15`
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT: Question details panel */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#0F1923] min-h-0">
-          {/* Q tabs */}
-          <div className="flex border-b border-white/10 overflow-x-auto flex-shrink-0 scrollbar-hide">
-            {questions.map((q, i) => {
-              const qcfg = STATUS_CONFIG[q.status]
-              return (
-                <button
-                  key={i}
-                  onClick={() => setActiveQ(i)}
-                  className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 text-sm transition-colors border-b-2 ${
-                    i === activeQ
-                      ? 'text-white border-orange-400 bg-white/5'
-                      : 'text-white/40 border-transparent hover:text-white/60 hover:bg-white/3'
-                  }`}
-                >
-                  <div className={`w-2 h-2 rounded-full ${qcfg.dot}`} />
-                  Q{q.number}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Question detail scroll */}
-          {activeQuestion && (
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {/* Question text */}
-              <div>
-                <p className="text-white/40 text-xs uppercase tracking-wide font-medium mb-2">
-                  Question {activeQuestion.number}
-                </p>
-                <p className="text-white text-base font-medium leading-relaxed">
-                  {activeQuestion.questionText}
-                </p>
-              </div>
-
-              {/* Status banner */}
-              <div className={`rounded-xl ${cfg.bg} border ${cfg.border} px-4 py-3 flex items-center gap-3`}>
-                <div className={`w-8 h-8 rounded-full bg-white/10 flex items-center justify-center ${cfg.text} font-bold text-lg`}>
-                  {cfg.icon}
-                </div>
-                <div className="flex-1">
-                  <p className={`${cfg.text} font-semibold text-sm`}>{cfg.label}</p>
-                  {activeQuestion.studentAnswer && (
-                    <p className="text-white/50 text-xs mt-0.5">
-                      Student wrote: <span className="text-white/70 italic">"{activeQuestion.studentAnswer}"</span>
-                    </p>
-                  )}
-                </div>
-                {/* Marks badge */}
-                {(() => {
-                  // Try score_pill first (new), fallback to badge (legacy)
-                  const pillMark = (autoMarks || []).find(
-                    (m: { type: string; label?: string }) => (m.type === 'score_pill' || m.type === 'badge') && m.label === `Q${activeQuestion.number}`
-                  ) as { score_text?: string; marks_awarded?: number; marks_possible?: number } | undefined
-                  const mp = activeQuestion.marks_possible ?? pillMark?.marks_possible ?? 1
-                  const ma = activeQuestion.marks_awarded ?? pillMark?.marks_awarded ?? 0
-                  if (mp) {
-                    return (
-                      <div className="text-right flex-shrink-0">
-                        <p className={`${cfg.text} font-bold text-lg`}>{ma}/{mp}</p>
-                        <p className="text-white/30 text-xs">marks</p>
-                      </div>
-                    )
-                  }
-                  return null
-                })()}
-              </div>
-
-              {/* Correct answer */}
-              <div className="rounded-xl bg-green-900/20 border border-green-500/25 p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-green-400 text-sm">✓</span>
-                  <p className="text-green-300 text-xs font-semibold uppercase tracking-wide">Correct Answer</p>
-                </div>
-                <p className="text-white font-medium">{activeQuestion.correctAnswer}</p>
-              </div>
-
-              {/* VED Insight */}
-              <div className="rounded-xl bg-purple-900/20 border border-purple-500/25 p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold">
-                    V
-                  </div>
-                  <p className="text-purple-300 text-xs font-semibold uppercase tracking-wide">VED Insight</p>
-                </div>
-                <p className="text-white/80 text-sm leading-relaxed">{activeQuestion.vedInsight}</p>
-              </div>
-
-              {/* Feedback */}
-              <div className="rounded-xl bg-white/5 border border-white/10 p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-amber-400 text-sm">💡</span>
-                  <p className="text-white/60 text-xs font-semibold uppercase tracking-wide">Feedback</p>
-                </div>
-                <p className="text-white/80 text-sm leading-relaxed">{activeQuestion.feedback}</p>
-              </div>
-
-              {/* Step by step */}
-              <StepByStep steps={activeQuestion.steps} />
-
-              {/* Action buttons */}
-              <div className="flex gap-3 pt-2 pb-4">
-                <button
-                  onClick={() => setShowReattempt(true)}
-                  className="flex-1 py-3 rounded-xl border border-orange-500/40 text-orange-300 text-sm font-medium hover:bg-orange-500/10 transition-colors flex items-center justify-center gap-2"
-                >
-                  <span>✏️</span>
-                  Reattempt
-                </button>
-                <button
-                  onClick={() => setShowChat(true)}
-                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
-                >
-                  <div className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold">V</div>
-                  Ask VED
-                </button>
-              </div>
+          {/* Page switcher — only when >1 page, at bottom of left panel */}
+          {pageCount > 1 && (
+            <div className="flex items-center justify-center gap-3 px-4 py-3 border-t border-white/30 bg-white/40 backdrop-blur flex-shrink-0">
+              <button
+                onClick={() => setActivePage(p => Math.max(0, p - 1))}
+                disabled={safePageIdx === 0}
+                className="w-9 h-9 rounded-full bg-white text-slate-700 font-bold hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center shadow"
+                title="Previous page"
+              >
+                ←
+              </button>
+              <span className="text-slate-800 text-sm font-semibold">
+                Worksheet {safePageIdx + 1}
+                {pageCount > 1 && <span className="text-slate-500 text-xs ml-1.5">of {pageCount}</span>}
+              </span>
+              <button
+                onClick={() => setActivePage(p => Math.min(pageCount - 1, p + 1))}
+                disabled={safePageIdx >= pageCount - 1}
+                className="w-9 h-9 rounded-full bg-white text-slate-700 font-bold hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center shadow"
+                title="Next page"
+              >
+                →
+              </button>
             </div>
           )}
         </div>
+
+        {/* RIGHT: EvalPanel per design handoff */}
+        <EvalPanel
+          questions={questions}
+          activeQ={activeQ}
+          activeAnnotationId={activeAnnotationId}
+          highlightedStep={highlightedStep}
+          onQuestionSelect={setActiveQ}
+          onAnnotationSelect={handleAnnotationSelect}
+          onNextQuestion={() => setActiveQ(q => Math.min(questions.length - 1, q + 1))}
+          onPractice={() => setShowReattempt(true)}
+          onAskVed={() => setShowChat(true)}
+        />
       </div>
 
       {/* Warning toast */}
@@ -480,6 +525,7 @@ export default function Evaluate() {
       {showCapture && (
         <CaptureModal
           onCapture={handleCapture}
+          onCaptureMulti={handleCaptureMulti}
           onClose={() => setShowCapture(false)}
         />
       )}

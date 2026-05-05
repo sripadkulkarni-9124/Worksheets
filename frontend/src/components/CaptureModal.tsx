@@ -2,10 +2,11 @@ import React, { useRef, useState, useCallback, useEffect } from 'react'
 
 interface Props {
   onCapture: (base64: string, mimeType: string, dataUrl: string) => void
+  onCaptureMulti?: (files: Array<{ base64: string; mimeType: string; dataUrl: string }>) => void
   onClose: () => void
 }
 
-export default function CaptureModal({ onCapture, onClose }: Props) {
+export default function CaptureModal({ onCapture, onCaptureMulti, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -16,6 +17,10 @@ export default function CaptureModal({ onCapture, onClose }: Props) {
   const [previewMime, setPreviewMime] = useState<string>('image/jpeg')
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
+
+  // Staged files — pick, review, then submit as a batch
+  type StagedFile = { id: string; name: string; dataUrl: string; base64: string; mimeType: string }
+  const [staged, setStaged] = useState<StagedFile[]>([])
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -66,17 +71,79 @@ export default function CaptureModal({ onCapture, onClose }: Props) {
     stopStream()
   }, [stopStream])
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const mime = file.type || 'image/jpeg'
-    setPreviewMime(mime)
-    const reader = new FileReader()
-    reader.onload = ev => {
-      setPreview(ev.target?.result as string)
+  /* Read file + bake EXIF orientation into pixels via canvas.
+     Without this, phone photos render rotated in browser (EXIF auto-rotate) but
+     Gemini/Konva use raw pixel dims → bbox coords mismatch actual display.
+     We draw through createImageBitmap({ imageOrientation: 'from-image' }) so the
+     output canvas is the visually-correct orientation in real pixels. */
+  const readAndNormalize = useCallback(async (f: File): Promise<StagedFile> => {
+    const maxDim = 2000 // cap huge camera files — preserves quality, shrinks >4K
+    const blob = f.slice(0, f.size, f.type || 'image/jpeg')
+    let bitmap: ImageBitmap
+    try {
+      bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' } as ImageBitmapOptions)
+    } catch {
+      // Browser doesn't support imageOrientation option — fall back to <img>
+      const img = await new Promise<HTMLImageElement>((res, rej) => {
+        const i = new Image()
+        i.onload = () => res(i)
+        i.onerror = rej
+        i.src = URL.createObjectURL(blob)
+      })
+      bitmap = img as unknown as ImageBitmap
     }
-    reader.readAsDataURL(file)
+    const w = (bitmap as ImageBitmap).width || (bitmap as unknown as HTMLImageElement).naturalWidth
+    const h = (bitmap as ImageBitmap).height || (bitmap as unknown as HTMLImageElement).naturalHeight
+    const scale = Math.min(1, maxDim / Math.max(w, h))
+    const outW = Math.round(w * scale)
+    const outH = Math.round(h * scale)
+    const canvas = document.createElement('canvas')
+    canvas.width = outW
+    canvas.height = outH
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(bitmap as unknown as CanvasImageSource, 0, 0, outW, outH)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+    const base64 = dataUrl.split(',')[1]
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: f.name,
+      dataUrl,
+      base64,
+      mimeType: 'image/jpeg',
+    }
   }, [])
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : []
+    const input = e.target
+    if (files.length === 0) return
+
+    Promise.all(files.map(readAndNormalize)).then(newStaged => {
+      setStaged(prev => [...prev, ...newStaged])
+      input.value = ''
+    }).catch(err => {
+      console.error('File read failed:', err)
+      input.value = ''
+    })
+  }, [readAndNormalize])
+
+  const removeStaged = useCallback((id: string) => {
+    setStaged(prev => prev.filter(s => s.id !== id))
+  }, [])
+
+  const submitStaged = useCallback(() => {
+    if (staged.length === 0) return
+    const payload = staged.map(s => ({ base64: s.base64, mimeType: s.mimeType, dataUrl: s.dataUrl }))
+    if (payload.length === 1) {
+      onCapture(payload[0].base64, payload[0].mimeType, payload[0].dataUrl)
+    } else if (onCaptureMulti) {
+      onCaptureMulti(payload)
+    } else {
+      // No multi handler — fall back to single-file (page 0)
+      onCapture(payload[0].base64, payload[0].mimeType, payload[0].dataUrl)
+    }
+    setStaged([])
+  }, [staged, onCapture, onCaptureMulti])
 
   const confirm = useCallback(() => {
     if (!preview) return
@@ -195,18 +262,69 @@ export default function CaptureModal({ onCapture, onClose }: Props) {
             </div>
           ) : (
             <div className="space-y-4">
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="rounded-xl border-2 border-dashed border-white/20 hover:border-orange-400/60 transition-colors aspect-[4/3] flex flex-col items-center justify-center cursor-pointer bg-white/5"
-              >
-                <div className="text-5xl mb-3">📄</div>
-                <p className="text-white/60 text-sm">Click to browse</p>
-                <p className="text-white/30 text-xs mt-1">JPG, PNG, WebP, HEIC</p>
-              </div>
+              {staged.length === 0 ? (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-xl border-2 border-dashed border-white/20 hover:border-orange-400/60 transition-colors aspect-[4/3] flex flex-col items-center justify-center cursor-pointer bg-white/5"
+                >
+                  <div className="text-5xl mb-3">📄</div>
+                  <p className="text-white/60 text-sm">Click to browse</p>
+                  <p className="text-white/30 text-xs mt-1">
+                    JPG, PNG, WebP, HEIC — <span className="text-orange-300">select one or multiple</span>
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Thumbnail grid */}
+                  <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
+                    {staged.map((s, i) => (
+                      <div key={s.id} className="relative group rounded-lg overflow-hidden bg-black aspect-square">
+                        <img src={s.dataUrl} alt={s.name} className="w-full h-full object-cover" />
+                        <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-[10px] font-bold">
+                          {i + 1}
+                        </div>
+                        <button
+                          onClick={() => removeStaged(s.id)}
+                          className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500/90 text-white text-xs flex items-center justify-center hover:bg-red-500 transition-colors"
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-lg border-2 border-dashed border-white/20 hover:border-orange-400/60 text-white/50 hover:text-orange-300 transition-colors flex flex-col items-center justify-center aspect-square"
+                      title="Add more"
+                    >
+                      <div className="text-2xl">＋</div>
+                      <div className="text-[10px] mt-0.5">Add</div>
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/60">
+                      {staged.length} page{staged.length > 1 ? 's' : ''} staged
+                    </span>
+                    <button
+                      onClick={() => setStaged([])}
+                      className="text-white/40 hover:text-red-400 transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                  <button
+                    onClick={submitStaged}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
+                  >
+                    Submit &amp; Evaluate ({staged.length} page{staged.length > 1 ? 's' : ''})
+                  </button>
+                </>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleFileChange}
                 className="hidden"
               />

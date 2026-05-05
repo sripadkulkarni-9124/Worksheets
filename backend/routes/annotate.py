@@ -62,6 +62,8 @@ async def annotate(req: AnnotateRequest):
         bb = q.get("bbox_norm", [])
         if bb and len(bb) == 4:
             ymin, xmin, ymax, xmax = bb
+            if ymin > ymax: ymin, ymax = ymax, ymin
+            if xmin > xmax: xmin, xmax = xmax, xmin
         else:
             slot = 0.886 / num_q
             ymin = 0.084 + qi * slot
@@ -73,6 +75,18 @@ async def annotate(req: AnnotateRequest):
 
         bw = xmax - xmin
         bh = ymax - ymin
+        MIN_BH = 0.04
+        MIN_BW = 0.08
+        if bh < MIN_BH:
+            pad = (MIN_BH - bh) / 2
+            ymin = max(0.0, ymin - pad)
+            ymax = min(1.0, ymax + pad)
+            bh = ymax - ymin
+        if bw < MIN_BW:
+            pad = (MIN_BW - bw) / 2
+            xmin = max(0.0, xmin - pad)
+            xmax = min(1.0, xmax + pad)
+            bw = xmax - xmin
 
         # ── BBOX — dashed outline around full question ──
         marks.append({
@@ -111,6 +125,7 @@ async def annotate(req: AnnotateRequest):
 
                 marks.append({
                     "type": "error_pin",
+                    "qi": qi,
                     "pin_x": pin_x,
                     "pin_y": pin_y,
                     "label_x": label_x,
@@ -152,6 +167,7 @@ async def annotate(req: AnnotateRequest):
             error_label = "Incorrect" if status == "incorrect" else "Partially Correct"
             marks.append({
                 "type": "error_pin",
+                "qi": qi,
                 "pin_x": pin_x,
                 "pin_y": pin_y,
                 "label_x": label_x,

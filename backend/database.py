@@ -9,9 +9,20 @@ engine = create_async_engine(DATABASE_URL)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+async def _column_exists(conn, table: str, column: str) -> bool:
+    result = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+    rows = result.fetchall()
+    return any(r[1] == column for r in rows)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        # Lightweight SQLite migrations — add missing columns
+        if not await _column_exists(conn, "session", "pages_json"):
+            await conn.exec_driver_sql(
+                "ALTER TABLE session ADD COLUMN pages_json TEXT DEFAULT '[]'"
+            )
 
 
 async def get_db():

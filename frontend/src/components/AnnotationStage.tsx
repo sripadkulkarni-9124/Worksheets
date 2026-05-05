@@ -35,6 +35,8 @@ interface Props {
   autoMarks: AutoMark[]
   activeQ: number
   onQuestionClick: (i: number) => void
+  onAnnotationClick?: (annId: string, stepRef: number | null) => void
+  activeAnnotationId?: string | null
   showFeedback: boolean
   questions: EvaluatedQuestion[]
   containerSize: { width: number; height: number }
@@ -49,12 +51,37 @@ export default function AnnotationStage({
   autoMarks,
   activeQ,
   onQuestionClick,
+  onAnnotationClick,
+  activeAnnotationId,
   showFeedback,
   questions,
   containerSize,
 }: Props) {
   const stageRef = useRef<Konva.Stage>(null)
+  const activeBboxRef = useRef<Konva.Rect | null>(null)
   const [image, setImage] = useState<HTMLImageElement | null>(null)
+  const [openPinIdx, setOpenPinIdx] = useState<number | null>(null)
+
+  /* ---------- One-shot pulse on activeQ change (idea #3) ----------
+     Flash the shadow blur + opacity on the newly-active bbox, then decay.
+     Pure cosmetic — doesn't touch x/y/scale so it can't fight React props. */
+  useEffect(() => {
+    const node = activeBboxRef.current
+    if (!node) return
+    // Start bright
+    node.shadowBlur(55)
+    node.shadowOpacity(1)
+    node.strokeWidth(node.strokeWidth() * 1.25)
+    const tween = new Konva.Tween({
+      node,
+      shadowBlur: 28,
+      shadowOpacity: 0.9,
+      duration: 0.6,
+      easing: Konva.Easings.EaseOut,
+    })
+    tween.play()
+    return () => { tween.destroy() }
+  }, [activeQ])
 
   /* ---------- Image loading ---------- */
   useEffect(() => {
@@ -67,7 +94,7 @@ export default function AnnotationStage({
   }, [imageDataUrl])
 
   /* ---------- Canvas dimensions (contain fit) ---------- */
-  const STRIP_H = 44
+  const STRIP_H = 0  // top pills strip removed — pills live in right panel now
   const { imageWidth, imageHeight, offsetX, offsetY } = useMemo(() => {
     if (!image || !containerSize.width || !containerSize.height)
       return { imageWidth: 0, imageHeight: 0, offsetX: 0, offsetY: 0 }
@@ -101,7 +128,7 @@ export default function AnnotationStage({
   const sw = useMemo(() => Math.max(1.5, imageWidth / 400), [imageWidth])
   const dotR = useMemo(() => Math.max(4, imageWidth * 0.008), [imageWidth])
   const fontSize = useMemo(() => Math.max(10, Math.min(13, imageWidth * 0.02)), [imageWidth])
-  const badgeR = useMemo(() => Math.max(14, imageWidth * 0.026), [imageWidth])
+  const badgeR = useMemo(() => Math.max(12, imageWidth * 0.022), [imageWidth])
 
   /* ---------- Parse marks into buckets ---------- */
   const buckets = useMemo(() => {
@@ -134,32 +161,52 @@ export default function AnnotationStage({
   /* ---------- Click/Tap handler (works for mouse + touch) ---------- */
   const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     const id = e.target.id()
-    if (!id) return
+    if (!id) { setOpenPinIdx(null); return }
+    if (id.startsWith('pin-hit-') || (id.startsWith('pin-') && !id.startsWith('pin-hit-'))) {
+      const idx = parseInt(id.replace(/^(pin-hit|pin)-/, ''))
+      if (!isNaN(idx)) {
+        setOpenPinIdx(prev => prev === idx ? null : idx)
+        // Bidirectional: tell parent which annotation got clicked
+        if (onAnnotationClick) {
+          const pin = buckets.pins[idx]
+          if (pin) {
+            const annId = `err-${idx}`
+            onAnnotationClick(annId, null)
+          }
+        }
+      }
+      return
+    }
     if (id.startsWith('pill-') || id.startsWith('bbox-') || id.startsWith('badge-hit-')) {
       const qi = parseInt(id.replace(/^(pill|bbox|badge-hit)-/, ''))
       if (!isNaN(qi)) onQuestionClick(qi)
     }
-  }, [onQuestionClick])
+    setOpenPinIdx(null)
+  }, [onQuestionClick, onAnnotationClick, buckets.pins])
 
   const handleMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current
     if (!stage) return
     const id = e.target.id()
-    stage.container().style.cursor =
-      (id?.startsWith('pill-') || id?.startsWith('bbox-') || id?.startsWith('badge-hit-'))
-        ? 'pointer' : 'default'
+    const isClickable =
+      id?.startsWith('pill-') || id?.startsWith('bbox-') ||
+      id?.startsWith('badge-hit-') || id?.startsWith('pin-') || id?.startsWith('pin-hit-')
+    stage.container().style.cursor = isClickable ? 'pointer' : 'default'
   }, [])
 
   /* ========== RENDER ========== */
 
   if (!imageWidth) return null
 
-  // Score strip pill layout
-  const pillW = Math.max(60, Math.min(85, (containerSize.width - 40) / Math.max(questions.length, 1) - 8))
+  // Score strip pill layout — reserve right-edge space for total score text
+  const TOTAL_TEXT_W = 130
+  const stripAvail = Math.max(60, containerSize.width - TOTAL_TEXT_W - 16)
   const pillH = 26
   const pillGap = 6
-  const totalPillsW = buckets.pills.length * (pillW + pillGap) - pillGap
-  const pillStartX = Math.floor((containerSize.width - totalPillsW) / 2)
+  const nPills = Math.max(buckets.pills.length, 1)
+  const pillW = Math.max(42, Math.min(85, (stripAvail - pillGap * (nPills - 1)) / nPills))
+  const totalPillsW = nPills * (pillW + pillGap) - pillGap
+  const pillStartX = Math.max(8, Math.floor((stripAvail - totalPillsW) / 2) + 8)
 
   return (
     <div style={{
@@ -167,6 +214,7 @@ export default function AnnotationStage({
       height: containerSize.height,
       overflow: 'hidden',
       touchAction: 'manipulation',
+      position: 'relative',
     }}>
       <Stage
         ref={stageRef}
@@ -176,93 +224,60 @@ export default function AnnotationStage({
         onTap={handleStageClick}
         onMouseMove={handleMouseMove}
       >
-        {/* Layer 0: Score strip */}
-        <Layer>
-          <Rect x={0} y={0} width={containerSize.width} height={STRIP_H} fill="#1A2332" />
-          {buckets.pills.map((pill, i) => {
-            const qi = pill.qi ?? i
-            const isActive = qi === activeQ
-            const status = pill.status || 'unanswered'
-            const color = STATUS_COLORS[status] || '#9CA3AF'
-            const pX = pillStartX + i * (pillW + pillGap)
-            const pY = (STRIP_H - pillH) / 2
-            return (
-              <Group key={`pill-${i}`} x={pX} y={pY}>
-                <Rect
-                  id={`pill-${qi}`}
-                  width={pillW} height={pillH}
-                  fill={hexToRgba(color, isActive ? 0.3 : 0.15)}
-                  stroke={isActive ? color : hexToRgba(color, 0.4)}
-                  strokeWidth={isActive ? 2 : 1}
-                  cornerRadius={pillH / 2}
-                  listening={true}
-                />
-                <Text
-                  text={`${pill.label || ''} ${pill.score_text || ''}`}
-                  x={0} y={0} width={pillW} height={pillH}
-                  align="center" verticalAlign="middle"
-                  fontSize={11} fontStyle="bold"
-                  fontFamily="-apple-system, sans-serif"
-                  fill={color} listening={false}
-                />
-              </Group>
-            )
-          })}
-          {score && (
-            <Text
-              text={`${score.got}/${score.total} (${score.pct}%)`}
-              x={containerSize.width - 120} y={0}
-              width={110} height={STRIP_H}
-              align="right" verticalAlign="middle"
-              fontSize={13} fontStyle="bold"
-              fontFamily="-apple-system, sans-serif"
-              fill={score.pct >= 70 ? '#22C55E' : score.pct >= 40 ? '#F97316' : '#EF4444'}
-            />
-          )}
-        </Layer>
+        {/* Top pills strip removed — Q-pills live in right-panel header */}
 
         {/* Layer 1: Image */}
         <Layer x={offsetX} y={offsetY}>
           {image && <KonvaImage image={image} x={0} y={0} width={imageWidth} height={imageHeight} />}
         </Layer>
 
-        {/* Layer 2: Bbox dashed outlines per question */}
+        {/* Layer 2: Bbox — FOCUS MODE (only active Q renders full bbox; others hidden) */}
         <Layer x={offsetX} y={offsetY}>
           {buckets.bboxes.map((b) => {
             if (b.w === undefined || b.h === undefined) return null
+            const bw = px(b.w), bh = py(b.h)
+            if (bw <= 0 || bh <= 0) return null
             const qi = b.qi ?? 0
+            if (qi !== activeQ) return null  // hide non-active
             const status = questions[qi]?.status || b.status || 'unanswered'
             const color = STATUS_COLORS[status] || '#9CA3AF'
-            const isActive = qi === activeQ
             return (
               <Rect
                 key={`bbox-${qi}`}
                 id={`bbox-${qi}`}
+                ref={(node) => { activeBboxRef.current = node }}
                 x={px(b.x)} y={py(b.y)}
-                width={px(b.w)} height={py(b.h)}
+                width={bw} height={bh}
                 stroke={color}
-                strokeWidth={isActive ? sw * 2.5 : sw * 1.5}
-                dash={[10, 6]}
-                fill={hexToRgba(color, 0.05)}
+                strokeWidth={Math.max(3.5, sw * 3)}
+                dash={[14, 4]}
+                fill={hexToRgba(color, 0.12)}
                 cornerRadius={4}
-                shadowColor={isActive ? color : 'transparent'}
-                shadowBlur={isActive ? 14 : 0}
+                shadowColor={color}
+                shadowBlur={28}
+                shadowOpacity={0.9}
                 listening={true}
               />
             )
           })}
         </Layer>
 
-        {/* Layer 3: Highlight boxes — thin rect around wrong values */}
+        {/* Layer 3: Highlight boxes — only for active question */}
         <Layer x={offsetX} y={offsetY} listening={false}>
           {buckets.highlights.map((h, i) => {
             if (h.w === undefined || h.h === undefined) return null
+            const hw = px(h.w), hh = py(h.h)
+            if (hw <= 0 || hh <= 0) return null
+            // Match by label "Q<n>"
+            const labelNum = h.label ? parseInt(h.label.replace(/^Q/, '')) : null
+            const activeNum = questions[activeQ]?.number
+            if (labelNum != null && activeNum != null && labelNum !== activeNum) return null
             const color = h.color || '#EF4444'
             return (
               <Rect
                 key={`hl-${i}`}
                 x={px(h.x)} y={py(h.y)}
-                width={px(h.w)} height={py(h.h)}
+                width={hw} height={hh}
                 fill={hexToRgba(color, 0.12)}
                 stroke={color}
                 strokeWidth={Math.max(1.5, sw)}
@@ -272,11 +287,17 @@ export default function AnnotationStage({
           })}
         </Layer>
 
-        {/* Layer 4: Error pins — dot + dashed line + label pill */}
-        <Layer x={offsetX} y={offsetY} listening={false}>
+        {/* Layer 4: Error pins — dot + dashed line + label pill (clickable → routes to Q) */}
+        <Layer x={offsetX} y={offsetY}>
           {buckets.pins.map((pin, i) => {
             if (pin.pin_x === undefined || pin.pin_y === undefined) return null
             if (pin.label_x === undefined || pin.label_y === undefined) return null
+            // Filter to active question — compare by qi or label "Q<n>"
+            const qi = pin.qi ?? -1
+            const labelNum = pin.label ? parseInt(pin.label.replace(/^Q/, '')) : null
+            const activeNum = questions[activeQ]?.number
+            const isActive = qi === activeQ || (labelNum != null && activeNum != null && labelNum === activeNum)
+            if (!isActive) return null
             const color = pin.color || '#EF4444'
             const pinPx = px(pin.pin_x)
             const pinPy = py(pin.pin_y)
@@ -288,32 +309,43 @@ export default function AnnotationStage({
             const estTextW = labelText.length * (fontSize * 0.6) + labelPadX * 2
             const labelH = fontSize + labelPadY * 2
 
+            const isOpen = openPinIdx === i
             return (
               <Group key={`pin-${i}`}>
-                {/* Dashed leader line */}
+                {/* Dashed leader line — non-interactive */}
                 <Line
                   points={[pinPx, pinPy, labelPx, labelPy + labelH / 2]}
                   stroke={color}
                   strokeWidth={Math.max(1, sw * 0.7)}
                   dash={[4, 3]}
                   opacity={0.7}
+                  listening={false}
                 />
-                {/* Pin dot */}
+                {/* Pin dot — clickable */}
                 <Circle
+                  id={`pin-${i}`}
                   x={pinPx} y={pinPy}
-                  radius={dotR}
+                  radius={isOpen ? dotR * 1.4 : dotR}
                   fill={color}
                   shadowColor={color}
-                  shadowBlur={6}
-                  shadowOpacity={0.5}
+                  shadowBlur={isOpen ? 10 : 6}
+                  shadowOpacity={0.6}
                 />
-                {/* Label pill */}
+                {/* Oversized invisible hit target around pin for easier tap */}
+                <Circle
+                  id={`pin-hit-${i}`}
+                  x={pinPx} y={pinPy}
+                  radius={dotR + 10}
+                  fill="transparent"
+                />
+                {/* Label pill — clickable */}
                 <Rect
+                  id={`pin-${i}`}
                   x={labelPx} y={labelPy}
                   width={estTextW} height={labelH}
-                  fill="rgba(255,255,255,0.95)"
+                  fill={isOpen ? color : 'rgba(255,255,255,0.95)'}
                   stroke={color}
-                  strokeWidth={1}
+                  strokeWidth={isOpen ? 2 : 1}
                   cornerRadius={labelH / 2}
                   shadowColor="rgba(0,0,0,0.15)"
                   shadowBlur={4}
@@ -325,7 +357,8 @@ export default function AnnotationStage({
                   fontSize={fontSize}
                   fontStyle="600"
                   fontFamily="-apple-system, 'Segoe UI', sans-serif"
-                  fill={color}
+                  fill={isOpen ? '#fff' : color}
+                  listening={false}
                 />
               </Group>
             )
@@ -342,11 +375,17 @@ export default function AnnotationStage({
             const cx = px(bg.x), cy = py(bg.y)
             const awarded = bg.marks_awarded ?? 0
             const possible = bg.marks_possible ?? 1
+            const isActive = qi === activeQ
             return (
-              <Group key={`badge-${qi}`} x={cx} y={cy}>
+              <Group key={`badge-${qi}`} x={cx} y={cy} scaleX={isActive ? 1.2 : 1} scaleY={isActive ? 1.2 : 1}>
                 <Circle
                   radius={badgeR} fill={color}
-                  shadowColor="rgba(0,0,0,0.25)" shadowBlur={6} shadowOffsetY={2}
+                  shadowColor={isActive ? color : 'rgba(0,0,0,0.25)'}
+                  shadowBlur={isActive ? 14 : 6}
+                  shadowOpacity={isActive ? 0.8 : 1}
+                  shadowOffsetY={2}
+                  stroke={isActive ? '#ffffff' : undefined}
+                  strokeWidth={isActive ? 2 : 0}
                 />
                 <Text
                   text={symbol}
@@ -376,6 +415,66 @@ export default function AnnotationStage({
           })}
         </Layer>
       </Stage>
+
+      {/* HTML tooltip overlays — filtered to active question */}
+      {buckets.pins.map((pin, i) => {
+        const isOpen = openPinIdx === i
+        const show = showFeedback || isOpen
+        if (!show) return null
+        if (pin.label_x === undefined || pin.label_y === undefined) return null
+        // Focus: only active question's tooltips
+        const qi = pin.qi ?? -1
+        const labelNum = pin.label ? parseInt(pin.label.replace(/^Q/, '')) : null
+        const activeNum = questions[activeQ]?.number
+        const isActive = qi === activeQ || (labelNum != null && activeNum != null && labelNum === activeNum)
+        if (!isActive) return null
+        const color = pin.color || '#EF4444'
+        const left = offsetX + px(pin.label_x)
+        const top = offsetY + py(pin.label_y) + 28
+        const maxW = Math.min(showFeedback ? 240 : 300, containerSize.width - 24)
+        const clampedLeft = Math.max(8, Math.min(left, containerSize.width - maxW - 8))
+        return (
+          <div
+            key={`tip-${i}`}
+            style={{
+              position: 'absolute',
+              left: clampedLeft,
+              top,
+              maxWidth: maxW,
+              zIndex: isOpen ? 30 : 20,
+              borderColor: color,
+            }}
+            className="rounded-xl bg-white shadow-2xl border-2 text-slate-900 text-xs p-2.5 pointer-events-auto"
+            onClick={(e) => { e.stopPropagation(); setOpenPinIdx(i) }}
+          >
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <span
+                className="font-bold uppercase tracking-wide"
+                style={{ color, fontSize: 10 }}
+              >
+                {pin.error_type || 'Error'}
+              </span>
+              {isOpen && !showFeedback && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setOpenPinIdx(null) }}
+                  className="text-slate-400 hover:text-slate-700 leading-none text-base -mt-0.5"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <div className="text-slate-800 leading-snug">
+              {pin.description || pin.error_type || 'No detail.'}
+            </div>
+            {pin.label && (
+              <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-[10px] text-slate-500">
+                {pin.label}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

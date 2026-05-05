@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from database import init_db
-from routes import evaluate, annotate, chat, reattempt, sessions, preprocess
+from routes import evaluate, annotate, chat, reattempt, sessions, preprocess, templates
 
 load_dotenv()
 
@@ -93,6 +93,7 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(reattempt.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(preprocess.router, prefix="/api")
+app.include_router(templates.router, prefix="/api")
 
 
 @app.get("/")

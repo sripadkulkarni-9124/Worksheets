@@ -1,0 +1,61 @@
+{
+  "title": "Circles — Class 10 Sample",
+  "subject": "Mathematics",
+  "chapter": "Circles",
+  "topic": "Basic properties",
+  "questions": [
+    {
+      "number": 1,
+      "questionText": "In a circle, a line that touches the circle at exactly one point is called a ______.",
+      "correctAnswer": "Tangent",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Recall definitions: secant cuts circle at 2 points, chord joins 2 points on circle.",
+        "A line touching at exactly one point is called a tangent."
+      ]
+    },
+    {
+      "number": 2,
+      "questionText": "A circular clock has a radius of 10 cm. What is the diameter of the clock?",
+      "correctAnswer": "20 cm",
+      "marks_possible": 1,
+      "solution_steps": [
+        "Diameter = 2 × radius",
+        "Diameter = 2 × 10 = 20 cm"
+      ]
+    },
+    {
+      "number": 3,
+      "questionText": "True or False: (1) The center of a circle lies outside the circle. (2) The radius is always twice the diameter.",
+      "correctAnswer": "(1) False, (2) False",
+      "marks_possible": 2,
+      "solution_steps": [
+        "Statement 1: center lies INSIDE the circle → False.",
+        "Statement 2: diameter = 2 × radius, so radius is HALF the diameter → False."
+      ]
+    },
+    {
+      "number": 4,
+      "questionText": "Fill in the blanks: (1) A straight line joining two points on a circle passing through its center is called the ______. (2) All points on a circle are at the same ______ from its center.",
+      "correctAnswer": "(1) Diameter, (2) Distance",
+      "marks_possible": 2,
+      "solution_steps": [
+        "A chord passing through the center = Diameter.",
+        "Definition of circle: locus of points equidistant from center → Distance (radius)."
+      ]
+    },
+    {
+      "number": 5,
+      "questionText": "Label the circle parts: Radius, Diameter (through O), Chord (not passing through O), Arc (between two points), Sector (shaded portion).",
+      "correctAnswer": "Student must label all 5 parts correctly on the diagram.",
+      "marks_possible": 2,
+      "solution_steps": [
+        "Radius: from center to any point on circle.",
+        "Diameter: any chord passing through center.",
+        "Chord: straight line joining two points on circle (not through center).",
+        "Arc: curved segment of circle between two points.",
+        "Sector: region bounded by two radii and arc."
+      ]
+    }
+  ]
+}
